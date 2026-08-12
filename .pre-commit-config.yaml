@@ -1,0 +1,37 @@
+# Only fast hooks with no project dependencies belong here.
+#
+# mypy and import-linter are deliberately absent: pre-commit runs each hook in
+# its own isolated virtualenv, where they cannot see the project's dependencies.
+# Either you declare every one of them by hand in `additional_dependencies` (and
+# they drift from the lock file), or you get false positives. They run in
+# scripts/lint.sh and in the CI `quality` job, where the environment is complete.
+#
+# If a `rev` fails to download: `pre-commit autoupdate`.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Catches an API key pasted into a file before it becomes part of the
+  # history — the one mistake in this project that cannot be undone with an
+  # amend.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks

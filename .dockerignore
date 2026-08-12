@@ -1,0 +1,52 @@
+# Version control
+.git
+.gitignore
+
+# Host virtualenvs: these must NEVER reach the image. They hold absolute host
+# paths and would shadow the container venv.
+.venv
+venv
+env
+
+# Python caches
+__pycache__
+*.py[cod]
+*.egg-info
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.import_linter_cache
+
+# Test and coverage artifacts
+.coverage
+.coverage.*
+htmlcov
+junit.xml
+
+# Frontend: node_modules is reinstalled inside the build stage, and a host
+# build would shadow the one produced there.
+frontend/node_modules
+frontend/dist
+
+# Secrets: the real .env never enters the build context
+.env
+.env.*
+!.env.example
+
+# Local tooling and editors
+.claude
+sasa
+.vscode
+.idea
+.github
+
+# Docs and configuration that the image does not need
+docs
+*.md
+!README.md
+.pre-commit-config.yaml
+.editorconfig
+
+# Docker
+Dockerfile
+docker-compose*.yml
