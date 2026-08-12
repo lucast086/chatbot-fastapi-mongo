@@ -95,6 +95,31 @@ class RateLimitedError(ProviderError):
         )
 
 
+class ModelUnavailableError(ProviderError):
+    """The configured model does not exist, or is no longer free.
+
+    This reason exists because the taxonomy got it wrong first. A retired model
+    returns 404, which was being folded into `provider_unavailable` and
+    therefore told the caller to try again in a moment — advice that can never
+    work, since nothing about waiting brings a retired model back. Free-tier
+    model names rotate, so this is the failure a reader is most likely to hit
+    weeks from now, and the remedy is to change one environment variable.
+    """
+
+    reason = "model_unavailable"
+    retryable = False
+
+    def __init__(self, model: str, detail: str | None = None) -> None:
+        message = (
+            f"The configured model '{model}' is not available. Free models are "
+            "rotated and retired regularly — set OPENROUTER_MODEL to a current "
+            "one from https://openrouter.ai/models?q=free"
+        )
+        if detail:
+            message = f"{message} (provider said: {detail})"
+        super().__init__(message)
+
+
 class ProviderUnavailableError(ProviderError):
     """A timeout, a connection failure, or an error on the provider's side."""
 

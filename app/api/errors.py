@@ -30,6 +30,7 @@ _STATUS_BY_REASON = {
     "validation_error": 422,
     "missing_api_key": 503,
     "invalid_credentials": 502,
+    "model_unavailable": 502,
     "rate_limited": 429,
     "provider_unavailable": 504,
     "internal_error": 500,

@@ -21,7 +21,7 @@ services:
       # everything except message generation works.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct:free}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
       HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
     ports:
       - "${API_PORT:-8000}:8000"

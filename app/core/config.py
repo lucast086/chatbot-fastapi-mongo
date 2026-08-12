@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # OpenRouter's `:free` models are rotated and retired, so this is a default
     # to be overridden rather than a constant to be relied on. The README says
     # where the current list lives.
-    openrouter_model: str = "meta-llama/llama-3.3-70b-instruct:free"
+    openrouter_model: str = "google/gemma-4-31b-it:free"
     request_timeout_seconds: float = Field(default=60.0, gt=0)
 
     # --- Conversation behaviour --------------------------------------------

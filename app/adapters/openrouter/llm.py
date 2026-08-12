@@ -1,0 +1,126 @@
+"""OpenRouterLLM: the LLMPort backed by OpenRouter.
+
+OpenRouter exposes an OpenAI-compatible API, so this uses the OpenAI SDK pointed
+at a different base URL rather than hand-rolled HTTP.
+
+This adapter is the only place that knows the provider SDK's exception types.
+Everything it can raise is translated into a `ProviderError` subclass here, which
+is what keeps the error taxonomy in one place instead of spread across the
+service and the router.
+"""
+
+import logging
+from collections.abc import AsyncIterator
+
+import openai
+from openai import AsyncOpenAI
+
+from app.domain.errors import (
+    InvalidCredentialsError,
+    MissingApiKeyError,
+    ModelUnavailableError,
+    ProviderUnavailableError,
+    RateLimitedError,
+)
+from app.domain.models import Message
+
+logger = logging.getLogger(__name__)
+
+
+class OpenRouterLLM:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        system_prompt: str,
+        timeout_seconds: float,
+    ) -> None:
+        self._model = model
+        self._system_prompt = system_prompt
+        # The SDK refuses to construct with an empty key, and there is nothing
+        # to construct it for: the service checks `MissingApiKeyError` before
+        # reaching this adapter. The placeholder keeps the object creatable so
+        # dependency wiring does not have to branch.
+        self._client = AsyncOpenAI(
+            api_key=api_key or "not-configured",
+            base_url=base_url,
+            timeout=timeout_seconds,
+            max_retries=0,  # Retries are the caller's decision, based on `retryable`.
+        )
+        self._configured = bool(api_key)
+
+    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+        if not self._configured:
+            raise MissingApiKeyError()
+
+        payload = [{"role": "system", "content": self._system_prompt}]
+        payload += [{"role": m.role.value, "content": m.content} for m in messages]
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=payload,  # type: ignore[arg-type]
+                stream=True,
+            )
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+        except openai.AuthenticationError as exc:
+            raise InvalidCredentialsError() from exc
+        except openai.PermissionDeniedError as exc:
+            # A valid key without access to this model. Same remedy as a bad
+            # key from the caller's point of view: fix the configuration.
+            raise InvalidCredentialsError() from exc
+        except openai.RateLimitError as exc:
+            raise RateLimitedError(retry_after=_retry_after_from(exc)) from exc
+        except (openai.APITimeoutError, openai.APIConnectionError) as exc:
+            raise ProviderUnavailableError("the request timed out") from exc
+        except openai.APIStatusError as exc:
+            logger.warning("Model provider returned %s: %s", exc.status_code, exc.message)
+            # 404 means the model name is wrong or has stopped being free.
+            # Kept separate from the 5xx case because waiting cannot fix it,
+            # and this was found by the live test rather than reasoned about:
+            # the default model shipped in this repo had already been retired.
+            if exc.status_code == 404:
+                raise ModelUnavailableError(self._model, _provider_detail(exc)) from exc
+            raise ProviderUnavailableError(f"the provider returned {exc.status_code}") from exc
+
+
+def _retry_after_from(exc: openai.RateLimitError) -> int | None:
+    """Pass the provider's own backoff through when it sent one.
+
+    Inventing a number would be worse than omitting the header: the client would
+    treat a guess as authoritative.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    raw = response.headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return int(float(raw))
+    except ValueError:
+        # The header also allows an HTTP date. Parsing that for a value we can
+        # do without is not worth the code.
+        return None
+
+
+def _provider_detail(exc: openai.APIStatusError) -> str | None:
+    """The provider's own explanation, when the body carries one.
+
+    OpenRouter's 404 for a retired model names the replacement slug, which is
+    the single most useful thing to put in front of whoever has to fix it.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str):
+                return message
+    return None

@@ -220,6 +220,34 @@ attacker, a deliberately vague error would be the right call.
 
 ---
 
+## A retired model is its own error, separate from an outage
+
+**Context.** The taxonomy started with four provider outcomes. The first time
+the `live` test ran against the real provider it failed: the model this
+repository shipped as its default, `meta-llama/llama-3.3-70b-instruct:free`, had
+already stopped being free. OpenRouter answers 404 for that.
+
+**Decision.** A fifth reason, `model_unavailable`, non-retryable, carrying the
+model name and the provider's own explanation.
+
+**Why.** The 404 was being folded into `provider_unavailable`, which is marked
+retryable and tells the caller to try again in a moment. That is advice that can
+never work — no amount of waiting brings a retired model back, and the frontend's
+backoff would have kept retrying a request that could only fail. The remedy is to
+change one environment variable, so the error has to say that. Because free-tier
+model names rotate, this is also the failure someone running this repository in a
+month is most likely to hit.
+
+**Worth noting:** this was not reasoned about in advance. Four categories looked
+complete until a test that talks to the real provider proved otherwise, which is
+the entire argument for keeping one such test around.
+
+**When this would NOT apply.** With a pinned, paid model that cannot disappear,
+a 404 would mean a bug in request construction rather than configuration, and
+folding it into a generic provider error would be right.
+
+---
+
 ## The fake LLM is a test double, never a runtime mode
 
 **Context.** A "demo mode" that returns canned answers would let the app appear to
