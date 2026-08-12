@@ -101,7 +101,12 @@ class OpenRouterLLM:
                     else "No models left.",
                 )
 
-        assert last_error is not None
+        if last_error is None:
+            # Only reachable if this adapter was built with an empty list. The
+            # settings field enforces min_length=1, but the constructor is
+            # public — and a real check is honest where an assert is not, since
+            # asserts are stripped under `python -O`.
+            raise ProviderUnavailableError("no models are configured")
         raise last_error
 
     async def _stream_one(self, model: str, messages: list[Message]) -> AsyncIterator[Chunk]:
