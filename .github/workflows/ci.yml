@@ -59,7 +59,17 @@ jobs:
       # -m "not live" excludes the one test that talks to the real model
       # provider. CI must not depend on an external service, a secret or a
       # rate-limited free-tier quota; that test is run deliberately, by hand.
-      - run: uv run pytest -m "not live"
+      - run: uv run pytest -m "not live" --cov-report=xml
+      - name: Report coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: coverage.xml
+          format: cobertura
+        # The badge is a dashboard, not a gate: the real threshold is enforced
+        # by pytest-cov's fail_under in the step above, which has already run.
+        # A misconfigured or unavailable Coveralls should degrade the badge, not
+        # fail a build whose tests genuinely passed.
+        continue-on-error: true
 
   security:
     name: Dependencies and secrets

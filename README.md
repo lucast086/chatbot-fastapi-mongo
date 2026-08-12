@@ -1,6 +1,7 @@
 # Chatbot — FastAPI + MongoDB
 
 [![CI](https://github.com/lucast086/chatbot-fastapi-mongo/actions/workflows/ci.yml/badge.svg)](https://github.com/lucast086/chatbot-fastapi-mongo/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/lucast086/chatbot-fastapi-mongo/badge.svg?branch=main)](https://coveralls.io/github/lucast086/chatbot-fastapi-mongo?branch=main)
 
 You type a message, a language model answers, and the conversation is persisted
 so it can be resumed later.
