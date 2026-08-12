@@ -23,7 +23,7 @@ from app.domain.errors import (
     ProviderUnavailableError,
     RateLimitedError,
 )
-from app.domain.models import Message, MessageRole
+from app.domain.models import Chunk, Message, MessageRole
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class OpenRouterLLM:
     async def aclose(self) -> None:
         await self._client.close()
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message]) -> AsyncIterator[Chunk]:
         if not self._configured:
             raise MissingApiKeyError()
 
@@ -93,7 +93,7 @@ class OpenRouterLLM:
                         continue
                     delta = chunk.choices[0].delta
                     if delta.content:
-                        yield delta.content
+                        yield Chunk(text=delta.content, model=self._model)
                     elif _reasoning_of(delta):
                         # Reasoning models put their tokens in `reasoning` with
                         # `content` null for long stretches. Yielding nothing

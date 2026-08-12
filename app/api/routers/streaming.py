@@ -24,6 +24,7 @@ from app.api.errors import error_body, error_response, status_for
 from app.api.schemas import SendMessageRequest
 from app.core.dependencies import ChatServiceDep
 from app.domain.errors import DomainError
+from app.domain.models import Chunk
 
 logger = logging.getLogger(__name__)
 
@@ -61,18 +62,16 @@ async def stream_message(
         )
 
     async def events() -> AsyncIterator[str]:
-        collected: list[str] = []
+        collected: list[Chunk] = []
         try:
             async for chunk in service.stream_turn(prepared):
                 collected.append(chunk)
-                yield _event("chunk", {"content": chunk})
+                yield _event("chunk", {"content": chunk.text})
             # Persisted only once the stream has completed, which is what keeps
             # the atomic-turn guarantee: a generation that fails part-way leaves
             # nothing behind, exactly as on the JSON route. The cost is that a
             # client disconnecting mid-stream loses that turn.
-            _, assistant_message, conversation = await service.finish_turn(
-                prepared, "".join(collected)
-            )
+            _, assistant_message, conversation = await service.finish_turn(prepared, collected)
         except DomainError as exc:
             # The status line is long gone, so the error travels in-band with
             # the same shape the JSON route would have returned.

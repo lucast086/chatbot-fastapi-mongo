@@ -17,7 +17,7 @@ from app.domain.errors import (
     ProviderUnavailableError,
     ValidationError,
 )
-from app.domain.models import Conversation, Message, MessageRole
+from app.domain.models import Chunk, Conversation, Message, MessageRole
 from app.domain.ports import ConversationStorePort, LLMPort, TitleGeneratorPort
 from app.services.conversation_service import DEFAULT_TITLE, derive_title
 
@@ -31,16 +31,12 @@ class ChatService:
         max_message_length: int,
         titles: TitleGeneratorPort | None = None,
         provider_configured: bool = True,
-        model_name: str | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         # Known before any I/O, so the streaming route can report it as a real
         # status code. The adapter keeps its own guard as defence in depth.
         self._provider_configured = provider_configured
-        # Recorded on each answer so a stored conversation says which model
-        # produced it. Previously the field existed and nothing ever set it.
-        self._model_name = model_name
         self._history_limit = history_limit
         self._max_message_length = max_message_length
         # Optional: without it, conversations keep the title derived from their
@@ -51,8 +47,8 @@ class ChatService:
         self, conversation_id: str, content: str
     ) -> tuple[Message, Message, Conversation]:
         prepared = await self.prepare_turn(conversation_id, content)
-        answer = "".join([chunk async for chunk in self.stream_turn(prepared)])
-        return await self.finish_turn(prepared, answer)
+        chunks = [chunk async for chunk in self.stream_turn(prepared)]
+        return await self.finish_turn(prepared, chunks)
 
     async def prepare_turn(self, conversation_id: str, content: str) -> "PreparedTurn":
         """Everything that can fail before the model is called.
@@ -92,20 +88,20 @@ class ChatService:
             user_message=user_message,
         )
 
-    async def stream_turn(self, prepared: "PreparedTurn") -> AsyncIterator[str]:
+    async def stream_turn(self, prepared: "PreparedTurn") -> AsyncIterator[Chunk]:
         """Yield the answer as it arrives. Nothing is persisted here."""
         async for chunk in self._llm.stream([*prepared.history, prepared.user_message]):
             yield chunk
 
     async def finish_turn(
-        self, prepared: "PreparedTurn", answer: str
+        self, prepared: "PreparedTurn", chunks: list[Chunk]
     ) -> tuple[Message, Message, Conversation]:
         """Persist the completed turn. The only place that writes.
 
         Called after the answer is fully known, which is what makes a failed
         generation leave nothing behind.
         """
-        text = answer.strip()
+        text = "".join(c.text for c in chunks).strip()
         if not text:
             # Storing an empty assistant message would look like a successful
             # turn that answered nothing, which is worse than a clear failure
@@ -120,7 +116,9 @@ class ChatService:
             created_at=prepared.user_message.created_at + timedelta(milliseconds=1),
             role=MessageRole.ASSISTANT,
             content=text,
-            model=self._model_name,
+            # Whichever model actually answered — with more than one
+            # configured, that is not necessarily the first.
+            model=chunks[-1].model,
         )
 
         # Only name a conversation that has not been named. A later turn must

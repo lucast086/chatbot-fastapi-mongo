@@ -60,7 +60,7 @@ def _response(status_code: int, headers: dict[str, str] | None = None) -> httpx.
 
 
 async def _consume(adapter: OpenRouterLLM) -> str:
-    return "".join([chunk async for chunk in adapter.stream(_messages())])
+    return "".join([chunk.text async for chunk in adapter.stream(_messages())])
 
 
 async def test_no_api_key_raises_missing_api_key_without_calling_the_provider() -> None:
@@ -212,7 +212,7 @@ async def test_live_the_configured_model_actually_answers() -> None:
 
     answer = "".join(
         [
-            chunk
+            chunk.text
             async for chunk in adapter.stream(
                 [
                     Message(

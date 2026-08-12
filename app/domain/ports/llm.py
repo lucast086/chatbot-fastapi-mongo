@@ -14,16 +14,20 @@ adapter's job, which is what keeps the taxonomy in one place.
 from collections.abc import AsyncIterator
 from typing import Protocol
 
-from app.domain.models import Message
+from app.domain.models import Chunk, Message
 
 
 class LLMPort(Protocol):
-    def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    def stream(self, messages: list[Message]) -> AsyncIterator[Chunk]:
         """Yield the answer in fragments, in order.
 
         `messages` is the full prompt context: the history window the service
         chose, oldest first. The system prompt is not part of it — the adapter
         owns how that is attached, because the shape differs per provider.
+
+        Each chunk names the model that produced it. An implementation is free
+        to choose among several, so the caller cannot assume it knows which one
+        answered.
         """
         ...
 

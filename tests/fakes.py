@@ -10,7 +10,7 @@ like it works while hiding whether the real integration does.
 from collections.abc import AsyncIterator
 
 from app.domain.errors import ProviderError
-from app.domain.models import Conversation, Message
+from app.domain.models import Chunk, Conversation, Message
 
 
 class FakeConversationStore:
@@ -80,19 +80,25 @@ class FakeLLM:
     in order to exercise a branch of the error taxonomy.
     """
 
-    def __init__(self, reply: str = "A fake answer.", error: ProviderError | None = None) -> None:
+    def __init__(
+        self,
+        reply: str = "A fake answer.",
+        error: ProviderError | None = None,
+        model: str = "fake/model",
+    ) -> None:
         self._reply = reply
         self._error = error
+        self._model = model
         self.received: list[list[Message]] = []
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream(self, messages: list[Message]) -> AsyncIterator[Chunk]:
         self.received.append(messages)
         if self._error is not None:
             raise self._error
         # Several chunks, not one: the JSON path joins them, and yielding a
         # single chunk would let a broken join pass unnoticed.
-        for chunk in self._reply.split(" "):
-            yield chunk + " "
+        for word in self._reply.split(" "):
+            yield Chunk(text=word + " ", model=self._model)
 
 
 class FakeTitleGenerator:
