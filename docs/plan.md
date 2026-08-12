@@ -76,8 +76,14 @@ consequence is that the text stays in the composer until the turn succeeds, and
 retrying is simply sending the same request again.
 
 **5. Two browser tabs writing to the same conversation.**
-Last write wins, no locking. Messages are inserts, so they cannot overwrite each
-other; the only field that competes is `updated_at`.
+Last write wins, no locking — but "the only thing that competes is `updated_at`"
+would be an understatement, so, precisely: three things compete. Both turns read
+history before either writes, so the second answer does not see the first
+question. Both may derive a title, and the later write wins. And because the
+assistant message is timestamped relative to its own question, two turns landing
+in the same millisecond can interleave as Q-A, Q-B, A-A, A-B on reload. No data
+is lost in any of these; the transcript is just confusing. Serialising writes per
+conversation is the fix and is out of scope here.
 
 **6. What happens with no API key?**
 The app starts. MongoDB, the UI, conversations and persistence all work. Only

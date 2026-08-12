@@ -42,9 +42,13 @@ class MongoConversationStore:
         if not messages:
             return
 
-        # One command, so the pair cannot be split by a crash between two
-        # separate inserts. This is not a transaction — MongoDB runs standalone
-        # here — but it removes the window that mattered.
+        # One command rather than two awaits. MongoDB guarantees atomicity per
+        # *document*, not per `insert_many`: an ordered insert stops at the
+        # first failing document and keeps what it already wrote, so a partial
+        # turn is reachable in principle. What this does buy is real and worth
+        # having — it removes the application-level gap between two separate
+        # writes, collapsing the window from "however long the event loop takes
+        # to come back" to the duration of one server command.
         await self._messages.insert_many([_message_to_mongo(m) for m in messages])
 
         update: dict[str, Any] = {"updated_at": datetime.now(UTC)}
@@ -109,8 +113,6 @@ def _message_to_mongo(message: Message) -> dict[str, Any]:
         "content": message.content,
         "created_at": message.created_at,
         "model": message.model,
-        "finish_reason": message.finish_reason,
-        "usage": message.usage,
     }
 
 
@@ -122,6 +124,4 @@ def _message_from_mongo(raw: dict[str, Any]) -> Message:
         content=raw["content"],
         created_at=raw["created_at"],
         model=raw.get("model"),
-        finish_reason=raw.get("finish_reason"),
-        usage=raw.get("usage") or {},
     )

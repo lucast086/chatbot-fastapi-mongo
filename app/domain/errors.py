@@ -2,7 +2,7 @@
 
 Services raise these; they never raise `HTTPException`, which would leak an HTTP
 concept into a layer that does not know HTTP exists. The translation to a status
-code happens once, in `api/exception_handlers.py`.
+code happens once, in `app/api/errors.py`.
 
 Every error carries the three fields the API's error envelope needs — `reason`,
 `message`, `retryable` — so the handler formats rather than decides. The mapping

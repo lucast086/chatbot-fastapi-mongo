@@ -30,7 +30,8 @@ happens is part of what the flow does.
 
 - **Given** a conversation that already has messages, **When** the user sends
   another, **Then** the model receives the most recent messages as context, up
-  to a configured limit, so the exchange reads as a conversation rather than
+  to a configured limit — which counts the message being sent, so a limit of 1
+  means no history at all — so the exchange reads as a conversation rather than
   isolated questions.
 
 - **Given** a conversation with no messages yet, **When** the first turn
@@ -116,7 +117,7 @@ obvious blast radius in the suite.
 | 3 | The conversation's last-activity time advances, moving it to the top of the list | `test_answering_moves_the_conversation_to_the_top`, `test_answering_moves_a_conversation_back_to_the_top_of_the_list` |
 | 4 | The first turn sets the conversation's title from the user's message | `test_the_first_turn_titles_the_conversation_from_the_message` |
 | 5 | A later turn does not overwrite an existing title | `test_a_later_turn_does_not_overwrite_the_title` |
-| 6 | The model receives at most the configured number of previous messages | `test_the_model_receives_at_most_the_configured_number_of_messages` |
+| 6 | The window is exactly the configured size: the message being sent plus the most recent previous ones | `test_the_history_window_is_exactly_the_configured_size` |
 | 7 | The model receives them oldest first | `test_the_model_receives_history_oldest_first`, `test_history_reaches_the_model_in_order_across_several_turns` |
 | 8 | A provider failure stores nothing | `test_a_provider_failure_stores_nothing`, `test_a_failed_turn_leaves_nothing_in_the_database` |
 | 9 | Re-sending the same message after a failure produces exactly one turn | `test_resending_after_a_failure_produces_exactly_one_turn`, `test_resending_after_a_failure_leaves_exactly_one_turn` |

@@ -78,6 +78,7 @@ def get_chat_service(
         max_message_length=settings.max_message_length,
         titles=titles if settings.generate_titles else None,
         provider_configured=settings.provider_configured,
+        model_name=settings.openrouter_model,
     )
 
 

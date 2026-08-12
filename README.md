@@ -261,6 +261,13 @@ retired — four categories looked complete until something real disagreed.
 
 - A token-based history budget instead of a message count. The window is the
   first thing that breaks on long conversations with a small context model.
+- Token usage and finish-reason accounting. A port typed `AsyncIterator[str]`
+  has nowhere to carry them, so a truncated answer is indistinguishable from a
+  complete one and there is no cost visibility. Fixing it means a terminal
+  metadata frame on the port — the honest change rather than fields nothing
+  populates, which is what was there before and got removed.
+- Serialised writes per conversation. Two turns sent at once interleave; see
+  `docs/plan.md` ambiguity 5 for exactly what competes.
 - Cursor pagination on the message list. Loading an entire conversation is fine
   at this size and will not stay fine.
 - A frontend test suite. There is none: the backend is what the brief says it

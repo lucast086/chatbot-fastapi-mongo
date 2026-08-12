@@ -31,12 +31,16 @@ class ChatService:
         max_message_length: int,
         titles: TitleGeneratorPort | None = None,
         provider_configured: bool = True,
+        model_name: str | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         # Known before any I/O, so the streaming route can report it as a real
         # status code. The adapter keeps its own guard as defence in depth.
         self._provider_configured = provider_configured
+        # Recorded on each answer so a stored conversation says which model
+        # produced it. Previously the field existed and nothing ever set it.
+        self._model_name = model_name
         self._history_limit = history_limit
         self._max_message_length = max_message_length
         # Optional: without it, conversations keep the title derived from their
@@ -116,6 +120,7 @@ class ChatService:
             created_at=prepared.user_message.created_at + timedelta(milliseconds=1),
             role=MessageRole.ASSISTANT,
             content=text,
+            model=self._model_name,
         )
 
         # Only name a conversation that has not been named. A later turn must

@@ -42,11 +42,25 @@ not support them, and the data model was shaped so they are not needed.
 transaction. The model is called first and the writes happen afterwards, so the
 window in which a crash can split a turn is the gap between two consecutive
 writes rather than the 5–30 seconds of the model call. The two messages then go
-out as a single `insert_many`, one command on the wire, so the pair cannot be
-split. The only write left outside that guarantee is the `updated_at` bump on the
-conversation, and its worst case is one row briefly out of order in the sidebar —
-no data lost, and the conversation itself reads correctly because it is loaded
-from `messages`.
+out as a single `insert_many`, one command on the wire.
+
+**Correction, after review.** An earlier version of this entry said the pair
+"cannot be split". That was an overstatement and it was wrong: MongoDB
+guarantees atomicity per *document*, and an ordered `insert_many` stops at the
+first failing document while keeping everything already written. A reviewer
+reproduced a stored user message with no assistant message. What `insert_many`
+actually buys is the removal of the application-level gap between two separate
+awaits — the window shrinks from "however long the event loop takes to come
+back" to one server command. That is a real improvement and still the right
+call here; it is just not a guarantee. The remaining exposure is narrow because
+both documents are small, carry generated ids, hit no unique constraint, and the
+answer is now capped by `max_output_tokens` so it cannot approach the 16MB
+document limit.
+
+The `updated_at` bump on the conversation is a third write, deliberately outside
+even that. Its worst case is one row briefly out of order in the sidebar — no
+data lost, and the conversation itself reads correctly because it is loaded from
+`messages`.
 
 **When this would NOT apply.** If a failed write could produce a state a user
 could act on incorrectly — anything touching money, inventory or permissions —
@@ -172,9 +186,9 @@ order to show a banner before the first message. That information is already in
 **Why.** They are contracts for different audiences with different stability
 requirements. Health is for an orchestrator and should be free to change shape;
 `/config` is a UI contract. And the banner needs the model name and a
-documentation URL, neither of which belongs in a health probe. Both read from the
-same function in the service layer, so there is one source of truth and two
-presentations.
+documentation URL, neither of which belongs in a health probe. Both read the
+same `Settings.provider_configured` property, so there is one source of truth
+and two presentations.
 
 **When this would NOT apply.** If the frontend needed nothing beyond a boolean,
 the extra endpoint would not earn its place.
