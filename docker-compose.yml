@@ -7,6 +7,18 @@ name: chatbot
 # the defaults below when it is not, which is the behaviour we want.
 
 services:
+  # The only published port. nginx serves the built frontend and proxies /api
+  # to the backend, so there is one origin, no CORS to configure and one URL to
+  # give a reviewer.
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -23,6 +35,9 @@ services:
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
       HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
+    # Published as well as proxied, so Swagger UI at /docs and a direct curl
+    # are available without going through nginx. Set API_PORT to change it if
+    # something else is already on 8000.
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
