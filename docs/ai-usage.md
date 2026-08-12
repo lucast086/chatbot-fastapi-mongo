@@ -169,6 +169,66 @@ has an explicit branch for greenfield projects that skips it.
 
 ---
 
+## Reviewing the result with AI, adversarially
+
+The brief says the submission is reviewed by several AI models in parallel. So
+before calling it finished I did that to it myself: three agents, run
+concurrently, each with a different brief — security and OWASP, architecture and
+backend design, and Python plus LLM-product practices — each asked to produce a
+pull-request review and to verify claims against the running code rather than
+reason about them.
+
+They found nine real defects. The rule I set for myself was that no finding got
+fixed until I had reproduced it, and that mattered: everything below was
+confirmed before being touched.
+
+The four worth knowing about:
+
+**A user-facing setting did the opposite of what it said.** `HISTORY_LIMIT=1`
+means "no history, just this message". The window is computed as `limit - 1`,
+which is `0`, and zero means *unlimited* to both MongoDB's `.limit()` and a
+Python slice. So the smallest legal window shipped the entire transcript — and
+the most natural reason to set it, cutting token spend on a free tier, was the
+one that broke.
+
+The interesting part is why 74 tests missed it. `FakeConversationStore`
+reproduced the real store's bug in the same direction, so a service test agreed
+with the adapter while both were wrong. That is what a double written against
+the implementation instead of the contract buys you, and it is the single most
+useful thing this review taught me.
+
+**Five documents described behaviour the code did not have.** The route
+docstring, an adapter comment, the frontend client, the README and a spec
+criterion all said a missing API key is caught before the stream opens and
+returns 503. It was not; it surfaced as an in-band event on a 200. Worse, the
+test covering that criterion carried the docstring "the client still gets 503"
+while posting to an unknown conversation and asserting 404 — it passed for a
+reason unrelated to what it documented. I made the code match the claim rather
+than the other way round.
+
+**A decision document justified a security posture the compose file did not
+implement.** The entry defending MongoDB without authentication rests on it
+being reachable from localhost only. The port was published on `0.0.0.0`. The
+reasoning was sound and the premise was false, which is a worse failure than
+being wrong outright.
+
+**A load-bearing claim was an overstatement.** "One command, so the pair cannot
+be split" — MongoDB guarantees atomicity per document, and an ordered
+`insert_many` keeps whatever it already wrote. A reviewer reproduced a stored
+question with no answer. I corrected the entry in place and left the correction
+visible rather than quietly rewriting history.
+
+What I take from it: every one of those four is the same failure in a different
+costume — **prose that outran the code**. The comments in this project are dense
+and mostly earn their place, but a confident comment is read as a specification,
+and four of them had drifted into being wrong. A wrong `# why` comment is worse
+than no comment, because it is exactly the line the next reader trusts.
+
+I did not accept everything. Suggestions to add rate limiting, cursor
+pagination, container resource limits and a non-root nginx were all correct in
+general and all declined for this scope — they are in the README's future-work
+list with that reasoning, rather than half-built here.
+
 ## The pattern
 
 Reading these back, the rejections are not random. Cases 2, 3 and 4 are the same
