@@ -106,18 +106,27 @@ which occurred, and only some are worth retrying. See `docs/decisions.md`.
 
 ## Verification criteria
 
-- [ ] A successful turn stores exactly two messages, question before answer
-- [ ] A successful turn returns both messages and the updated conversation
-- [ ] The conversation's last-activity time advances, moving it to the top of the list
-- [ ] The first turn sets the conversation's title from the user's message
-- [ ] A later turn does not overwrite an existing title
-- [ ] The model receives at most the configured number of previous messages
-- [ ] The model receives them oldest first
-- [ ] A provider failure stores nothing: the message count is unchanged
-- [ ] Re-sending the same message after a failure produces exactly one turn
-- [ ] Each provider failure maps to its own cause and retryable flag
-- [ ] A missing API key is reported without attempting a network call
-- [ ] A rate limit passes the provider's wait time through when present
-- [ ] An empty or whitespace-only message is rejected before any model call
-- [ ] Sending to an unknown conversation is reported as not found
-- [ ] An empty answer from the provider does not produce a stored turn
+Each one names the test that covers it, so changing a behaviour here has an
+obvious blast radius in the suite.
+
+| # | Criterion | Covered by |
+|---|---|---|
+| 1 | A successful turn stores exactly two messages, question before answer | `test_a_turn_stores_exactly_two_messages_question_first` |
+| 2 | A successful turn returns both messages and the updated conversation | `test_a_turn_returns_both_messages_and_the_conversation` |
+| 3 | The conversation's last-activity time advances, moving it to the top of the list | `test_answering_moves_the_conversation_to_the_top`, `test_answering_moves_a_conversation_back_to_the_top_of_the_list` |
+| 4 | The first turn sets the conversation's title from the user's message | `test_the_first_turn_titles_the_conversation_from_the_message` |
+| 5 | A later turn does not overwrite an existing title | `test_a_later_turn_does_not_overwrite_the_title` |
+| 6 | The model receives at most the configured number of previous messages | `test_the_model_receives_at_most_the_configured_number_of_messages` |
+| 7 | The model receives them oldest first | `test_the_model_receives_history_oldest_first`, `test_history_reaches_the_model_in_order_across_several_turns` |
+| 8 | A provider failure stores nothing | `test_a_provider_failure_stores_nothing`, `test_a_failed_turn_leaves_nothing_in_the_database` |
+| 9 | Re-sending the same message after a failure produces exactly one turn | `test_resending_after_a_failure_produces_exactly_one_turn`, `test_resending_after_a_failure_leaves_exactly_one_turn` |
+| 10 | Each provider failure maps to its own cause and retryable flag | `test_each_provider_failure_has_its_own_status_and_reason`, `test_provider_failures_become_the_right_domain_error` |
+| 11 | A missing API key is reported without attempting a network call | `test_no_api_key_raises_missing_api_key_without_calling_the_provider` |
+| 12 | A rate limit passes the provider's wait time through when present | `test_a_rate_limit_passes_the_providers_own_retry_after_through`, `test_a_rate_limit_sets_retry_after`, `test_no_retry_after_header_when_the_provider_did_not_send_one` |
+| 13 | An empty or whitespace-only message is rejected before any model call | `test_an_empty_message_is_rejected_before_any_model_call`, `test_an_empty_message_is_rejected_by_the_schema` |
+| 14 | Sending to an unknown conversation is reported as not found | `test_sending_to_an_unknown_conversation_is_not_found`, `test_sending_to_an_unknown_conversation_is_404` |
+| 15 | An empty answer from the provider does not produce a stored turn | `test_an_empty_answer_does_not_produce_a_stored_turn` |
+
+**Result: 15 of 15 mapped.** Criteria 3, 7, 8 and 9 are covered twice on
+purpose — once against a fake store and once against a real MongoDB, because a
+fake can satisfy the service's expectations while the adapter does not.
