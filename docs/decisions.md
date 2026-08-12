@@ -234,6 +234,39 @@ attacker, a deliberately vague error would be the right call.
 
 ---
 
+## Two timeouts, because "slow" and "gone quiet" are different failures
+
+**Context.** A single request timeout has to serve two situations at once: a
+model that is answering slowly, and a model that accepted the request and will
+never say anything. Set it long enough for the first and the second freezes the
+UI; set it short enough for the second and you cut off legitimate long answers.
+
+This was not hypothetical. Watching a recording of someone using the app, the
+interface sat on "Thinking…" for so long it read as a crash.
+
+**Decision.** Two timeouts. `REQUEST_TIMEOUT_SECONDS` (60) bounds the whole
+call. `FIRST_TOKEN_TIMEOUT_SECONDS` (20) bounds only the wait for the *first*
+token.
+
+**Why.** Those two windows have different costs. Once a token has arrived,
+abandoning the model means throwing away text the user is already reading, so
+patience is right. Before the first token, nothing has reached the browser —
+abandoning costs nothing, and the fallback chain can try a different model,
+which is very often the actual fix since the stall is usually one overloaded
+free-tier host.
+
+It also lines up with the constraint the fallback already had: no switching
+models once bytes are on the wire. The first-token timeout is precisely the
+largest window in which switching is still free.
+
+**When this would NOT apply.** With a reasoning model that legitimately thinks
+for a minute before emitting anything, a 20-second first-token budget would kill
+every request. Reasoning models are excluded from the default list for a
+different reason — they put their output in `reasoning` rather than `content` —
+but anyone adding one has to raise this value too.
+
+---
+
 ## Several models, tried in order, rather than asking the user to retry
 
 **Context.** OpenRouter rate limits `:free` models *per model*, not per account.

@@ -41,6 +41,10 @@ services:
       # Tried in order. Free models are rate limited per model, so the second
       # usually answers the moment the first says 429.
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,inclusionai/ling-3.0-tiny:free}
+      SYSTEM_PROMPT: ${SYSTEM_PROMPT:-You are a helpful assistant. Answer clearly and concisely.}
+      MAX_MESSAGE_LENGTH: ${MAX_MESSAGE_LENGTH:-8000}
+      MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-2048}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-60}
       FIRST_TOKEN_TIMEOUT_SECONDS: ${FIRST_TOKEN_TIMEOUT_SECONDS:-20}
       HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
       GENERATE_TITLES: ${GENERATE_TITLES:-true}
