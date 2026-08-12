@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from app.adapters.mongo.connection import create_client, ensure_indexes
 from app.core.config import get_settings
+from app.core.dependencies import DbDep, SettingsDep
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ async def health_live() -> dict[str, str]:
 
 
 @app.get("/health/ready", tags=["health"])
-async def health_ready() -> JSONResponse:
+async def health_ready(settings: SettingsDep, db: DbDep) -> JSONResponse:
     """Readiness: can this instance serve requests right now.
 
     Returns 200 with `status: "degraded"` when only the API key is missing. That
@@ -83,11 +84,10 @@ async def health_ready() -> JSONResponse:
     This is a status report rather than an error response, so it does not use
     the error envelope the rest of the API returns.
     """
-    settings = get_settings()
     checks: dict[str, Any] = {}
 
     try:
-        await app.state.mongo_db.command("ping")
+        await db.command("ping")
         checks["mongo"] = "ok"
         mongo_ok = True
     except Exception:
