@@ -11,8 +11,11 @@ from app.api.schemas import (
     ConversationDetail,
     ConversationSummary,
     CreateConversationRequest,
+    MessageOut,
+    SendMessageRequest,
+    SendMessageResponse,
 )
-from app.core.dependencies import ConversationServiceDep
+from app.core.dependencies import ChatServiceDep, ConversationServiceDep
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -55,3 +58,25 @@ async def delete_conversation(
     service: ConversationServiceDep,
 ) -> None:
     await service.delete(conversation_id)
+
+
+@router.post("/{conversation_id}/messages", status_code=status.HTTP_201_CREATED)
+async def send_message(
+    conversation_id: str,
+    body: SendMessageRequest,
+    service: ChatServiceDep,
+) -> SendMessageResponse:
+    """Send a message and get the model's answer.
+
+    Either the whole turn is stored or none of it is. A provider failure leaves
+    the conversation untouched and returns a typed error, so re-sending the same
+    request afterwards is safe and produces exactly one turn.
+    """
+    user_message, assistant_message, conversation = await service.send_message(
+        conversation_id, body.content
+    )
+    return SendMessageResponse(
+        user_message=MessageOut.from_domain(user_message),
+        assistant_message=MessageOut.from_domain(assistant_message),
+        conversation=ConversationSummary.from_domain(conversation),
+    )

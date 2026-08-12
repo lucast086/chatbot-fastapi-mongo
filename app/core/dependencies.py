@@ -11,8 +11,10 @@ from fastapi import Depends, Request
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.adapters.mongo.conversation_store import MongoConversationStore
+from app.adapters.openrouter.llm import OpenRouterLLM
 from app.core.config import Settings, get_settings
-from app.domain.ports import ConversationStorePort
+from app.domain.ports import ConversationStorePort, LLMPort
+from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -40,3 +42,33 @@ def get_conversation_service(store: ConversationStoreDep) -> ConversationService
 
 
 ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
+
+
+def get_llm(settings: SettingsDep) -> LLMPort:
+    # There is no fake branch here. In a chatbot the generation is the product,
+    # so a runtime fake would make the app look like it works while hiding
+    # whether the real integration does. The double lives in tests only.
+    return OpenRouterLLM(
+        api_key=settings.openrouter_api_key.get_secret_value(),
+        base_url=settings.openrouter_base_url,
+        model=settings.openrouter_model,
+        system_prompt=settings.system_prompt,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+
+
+LLMDep = Annotated[LLMPort, Depends(get_llm)]
+
+
+def get_chat_service(
+    store: ConversationStoreDep, llm: LLMDep, settings: SettingsDep
+) -> ChatService:
+    return ChatService(
+        store=store,
+        llm=llm,
+        history_limit=settings.history_limit,
+        max_message_length=settings.max_message_length,
+    )
+
+
+ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]

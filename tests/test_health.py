@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import Settings
-from app.core.dependencies import get_db, get_settings
+from app.core.config import Settings, get_settings
+from app.core.dependencies import get_db
 from app.main import app
 
 

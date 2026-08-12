@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 
 import openai
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from app.domain.errors import (
     InvalidCredentialsError,
@@ -22,7 +23,7 @@ from app.domain.errors import (
     ProviderUnavailableError,
     RateLimitedError,
 )
-from app.domain.models import Message
+from app.domain.models import Message, MessageRole
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +55,24 @@ class OpenRouterLLM:
         if not self._configured:
             raise MissingApiKeyError()
 
-        payload = [{"role": "system", "content": self._system_prompt}]
-        payload += [{"role": m.role.value, "content": m.content} for m in messages]
+        # Built role by role rather than from `m.role.value`, which is a plain
+        # str: the SDK types each role as a Literal. Suppressing that mismatch
+        # instead would also defeat overload resolution on `stream`, turning the
+        # return type into a union that needs a second suppression. Two silenced
+        # errors to avoid four explicit lines is a bad trade.
+        payload: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": self._system_prompt}
+        ]
+        for message in messages:
+            if message.role is MessageRole.USER:
+                payload.append({"role": "user", "content": message.content})
+            else:
+                payload.append({"role": "assistant", "content": message.content})
 
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
-                messages=payload,  # type: ignore[arg-type]
+                messages=payload,
                 stream=True,
             )
             async for chunk in response:
