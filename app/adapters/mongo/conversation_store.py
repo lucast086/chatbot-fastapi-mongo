@@ -63,6 +63,11 @@ class MongoConversationStore:
         await self._conversations.update_one({"_id": conversation_id}, {"$set": {"title": title}})
 
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
+        # MongoDB treats .limit(0) as "no limit", the exact opposite of what a
+        # caller asking for zero messages means. Without this guard,
+        # HISTORY_LIMIT=1 ships the entire conversation on every request.
+        if limit <= 0:
+            return []
         cursor = (
             self._messages.find({"conversation_id": conversation_id})
             .sort("created_at", -1)

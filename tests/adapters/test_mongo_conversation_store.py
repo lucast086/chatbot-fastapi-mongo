@@ -140,3 +140,17 @@ async def test_deleting_an_unknown_conversation_reports_that_it_was_not_there(
     store = MongoConversationStore(mongo_db)
 
     assert await store.delete_conversation("does-not-exist") is False
+
+
+async def test_a_zero_history_limit_returns_no_messages(
+    mongo_db: AsyncDatabase[dict[str, Any]],
+) -> None:
+    """MongoDB's `.limit(0)` means unlimited, which is the opposite of what a
+    caller asking for zero wants. HISTORY_LIMIT=1 computes a limit of 0, so
+    without the guard this shipped the whole conversation on every request."""
+    store = MongoConversationStore(mongo_db)
+    await store.create_conversation(_conversation("c1"))
+    await store.add_turn(_turn("c1", "hello", "hi"))
+
+    assert await store.get_recent_messages("c1", limit=0) == []
+    assert len(await store.get_recent_messages("c1", limit=1)) == 1

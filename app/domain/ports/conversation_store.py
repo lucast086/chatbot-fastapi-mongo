@@ -37,7 +37,12 @@ class ConversationStorePort(Protocol):
 
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
         """The most recent `limit` messages, oldest first — ready to be used as
-        prompt context without the caller re-sorting."""
+        prompt context without the caller re-sorting.
+
+        A `limit` of zero or less returns no messages. Stated here because the
+        obvious MongoDB implementation does the opposite: `.limit(0)` means
+        unlimited.
+        """
         ...
 
     async def get_messages(self, conversation_id: str) -> list[Message]:

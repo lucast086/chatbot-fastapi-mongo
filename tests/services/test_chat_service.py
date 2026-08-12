@@ -100,17 +100,29 @@ async def test_a_later_turn_does_not_overwrite_the_title(
 # --- history window ---------------------------------------------------------
 
 
-async def test_the_model_receives_at_most_the_configured_number_of_messages(
-    store: FakeConversationStore,
+@pytest.mark.parametrize(
+    ("history_limit", "expected"),
+    [
+        # 1 means "no history, just this message". The obvious implementation
+        # computes limit-1 = 0, and both MongoDB and a naive slice read 0 as
+        # "everything" — the opposite. Pinned here because it shipped wrong.
+        (1, ["q3"]),
+        (2, ["a2", "q3"]),
+        (4, ["a1", "q2", "a2", "q3"]),
+    ],
+)
+async def test_the_history_window_is_exactly_the_configured_size(
+    store: FakeConversationStore, history_limit: int, expected: list[str]
 ) -> None:
-    llm = FakeLLM()
-    service = _service(store, llm, history_limit=4)
-    for i in range(5):
-        await service.send_message("c1", f"question {i}")
+    # Three completed turns, each answer distinguishable so the assertion can
+    # pin the exact window rather than only its length.
+    for i in range(3):
+        await _service(store, FakeLLM(reply=f"a{i}"), history_limit).send_message("c1", f"q{i}")
 
-    # The last call sees the window, which includes the message just sent.
-    last_context = llm.received[-1]
-    assert len(last_context) <= 4
+    llm = FakeLLM(reply="final")
+    await _service(store, llm, history_limit).send_message("c1", "q3")
+
+    assert [m.content for m in llm.received[-1]] == expected
 
 
 async def test_the_model_receives_history_oldest_first(

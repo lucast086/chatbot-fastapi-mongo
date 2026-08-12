@@ -58,6 +58,12 @@ class FakeConversationStore:
         )
 
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
+        # `[-0:]` is `[0:]`, the whole list. The fake used to reproduce the real
+        # store's limit(0) bug exactly, which is why no test caught it: a double
+        # written against the implementation instead of the contract agrees with
+        # it even when both are wrong.
+        if limit <= 0:
+            return []
         return self._for(conversation_id)[-limit:]
 
     async def get_messages(self, conversation_id: str) -> list[Message]:
