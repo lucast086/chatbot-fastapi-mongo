@@ -298,6 +298,71 @@ costs more than the setup it saves.
 
 ---
 
+## No `env_file:` in the compose file
+
+**Context.** The brief requires `docker compose up` to work from a clean clone
+with no manual steps beyond providing the API key. The habitual way to feed
+configuration to a service is `env_file: .env`.
+
+**Decision.** No `env_file:` anywhere. Every variable is declared inline in
+`environment:` using `${VAR:-default}`.
+
+**Why.** `env_file:` pointing at a file that does not exist is a hard error, not
+a warning — so the habitual approach breaks the exact scenario the brief asks
+about: someone who clones and runs before creating a `.env`. Compose's own
+`${VAR}` interpolation reads `.env` automatically when it is there and falls back
+to the declared default when it is not, which is the behaviour wanted here. The
+inline defaults also make the compose file readable as documentation of what the
+service actually consumes.
+
+**When this would NOT apply.** With dozens of variables, inlining them turns the
+compose file into a wall of text, and a committed `.env.defaults` combined with
+an optional override is easier to read.
+
+---
+
+## MongoDB runs without authentication
+
+**Context.** The MongoDB container could be started with a root username and
+password.
+
+**Decision.** No authentication. MongoDB is reachable from the compose network
+and from localhost only.
+
+**Why.** The credentials would have to be committed to this repository to keep
+`docker compose up` working with no manual steps, which means they protect
+nothing — anyone who can reach the port can read the credentials that guard it.
+That is the appearance of security rather than security, and it costs a reviewer
+an extra concept to hold. Saying plainly that this is a local review environment
+is more honest than a password published next to the lock.
+
+**When this would NOT apply.** The moment the port is exposed beyond localhost,
+or the same compose file is used anywhere shared, authentication stops being
+theatre and the credentials have to come from outside the repository.
+
+---
+
+## A failure to create indexes does not stop startup
+
+**Context.** The lifespan creates indexes on boot. That needs a reachable
+MongoDB, and MongoDB might not be reachable.
+
+**Decision.** The call is wrapped: a failure logs a warning and the application
+continues starting.
+
+**Why.** Readiness already reports MongoDB being unreachable, so the information
+is not lost. Crashing instead would convert a recoverable outage into a restart
+loop, and `restart: unless-stopped` would keep the container cycling while the
+logs scroll past the one line explaining why. Index creation is also idempotent,
+so the next successful start fixes it.
+
+**When this would NOT apply.** If the application could silently produce wrong
+results without its indexes — a uniqueness constraint enforced by an index, for
+instance — refusing to start would be the safer failure. These two indexes only
+affect query performance and ordering.
+
+---
+
 ## Architecture rules are enforced by CI, not by convention
 
 **Context.** Layered architecture tends to erode: a service imports an adapter
