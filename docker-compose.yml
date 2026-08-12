@@ -1,0 +1,57 @@
+name: chatbot
+
+# Note there is no `env_file:` anywhere in this file. `env_file: .env` fails
+# outright when the file does not exist, which would break `docker compose up`
+# on a clean clone — the one thing that has to work. Compose interpolates
+# ${VAR} from a .env file automatically when one is present and falls back to
+# the defaults below when it is not, which is the behaviour we want.
+
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The service name, not localhost: this resolves on the compose network.
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: ${MONGO_DB:-chatbot}
+      # The one value with no working default. Absent, the app still starts and
+      # everything except message generation works.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-meta-llama/llama-3.3-70b-instruct:free}
+      HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      mongo:
+        # Not a bare `depends_on: [mongo]`. Without `service_healthy`, Compose
+        # only waits for the container to start, not for MongoDB to accept
+        # connections, and index creation on startup would race it.
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:8
+    # No authentication. This stack is a local development and review
+    # environment: MongoDB is only reachable from the compose network and from
+    # localhost. Credentials here would be committed to the repository, which
+    # buys the appearance of security rather than security.
+    volumes:
+      # A named volume, not a bind mount: conversations have to survive
+      # `docker compose down` followed by `up`. `down -v` is what wipes them.
+      - mongo-data:/data/db
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
