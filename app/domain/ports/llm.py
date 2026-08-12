@@ -26,3 +26,14 @@ class LLMPort(Protocol):
         owns how that is attached, because the shape differs per provider.
         """
         ...
+
+
+class TitleGeneratorPort(Protocol):
+    async def suggest_title(self, question: str, answer: str) -> str | None:
+        """A short label for a conversation, or None if one cannot be produced.
+
+        Returning None rather than raising is deliberate: a title is a nicety,
+        and a conversation that fails to get a prettier name must not fail the
+        turn that produced it.
+        """
+        ...

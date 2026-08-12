@@ -30,6 +30,11 @@ class ConversationStorePort(Protocol):
         """
         ...
 
+    async def rename_conversation(self, conversation_id: str, title: str) -> None:
+        """Replace a conversation's title. Used only by the title generator,
+        after a turn has already been stored."""
+        ...
+
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
         """The most recent `limit` messages, oldest first — ready to be used as
         prompt context without the caller re-sorting."""

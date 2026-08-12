@@ -136,3 +136,54 @@ def _provider_detail(exc: openai.APIStatusError) -> str | None:
             if isinstance(message, str):
                 return message
     return None
+
+
+class OpenRouterTitleGenerator:
+    """Names a conversation from its first exchange.
+
+    A separate class from OpenRouterLLM rather than another method on it: the
+    chat port is what the turn depends on, and this is a nicety that must never
+    be able to fail a turn. Keeping them apart makes that hard to get wrong.
+    """
+
+    _PROMPT = (
+        "Summarise this exchange as a conversation title of at most six words. "
+        "Reply with the title only: no quotes, no punctuation at the end, no preamble."
+    )
+
+    def __init__(self, api_key: str, base_url: str, model: str, timeout_seconds: float) -> None:
+        self._model = model
+        self._configured = bool(api_key)
+        self._client = AsyncOpenAI(
+            api_key=api_key or "not-configured",
+            base_url=base_url,
+            # Much shorter than the chat timeout: nobody waits on a title, and a
+            # slow one should be abandoned rather than delay the response.
+            timeout=min(timeout_seconds, 15.0),
+            max_retries=0,
+        )
+
+    async def suggest_title(self, question: str, answer: str) -> str | None:
+        if not self._configured:
+            return None
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": self._PROMPT},
+                    {"role": "user", "content": f"User: {question}\n\nAssistant: {answer}"},
+                ],
+                max_tokens=24,
+            )
+        except Exception:
+            # Every failure is swallowed on purpose. The turn has already been
+            # answered and stored; the fallback title is already in place. There
+            # is nothing here worth surfacing to the user.
+            logger.info("Could not generate a title; keeping the derived one.")
+            return None
+
+        choices = response.choices
+        if not choices or not choices[0].message.content:
+            return None
+        title = choices[0].message.content.strip().strip('"').strip()
+        return title or None

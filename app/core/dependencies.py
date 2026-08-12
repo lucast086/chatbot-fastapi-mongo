@@ -11,9 +11,9 @@ from fastapi import Depends, Request
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.adapters.mongo.conversation_store import MongoConversationStore
-from app.adapters.openrouter.llm import OpenRouterLLM
+from app.adapters.openrouter.llm import OpenRouterLLM, OpenRouterTitleGenerator
 from app.core.config import Settings, get_settings
-from app.domain.ports import ConversationStorePort, LLMPort
+from app.domain.ports import ConversationStorePort, LLMPort, TitleGeneratorPort
 from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
 
@@ -60,14 +60,30 @@ def get_llm(settings: SettingsDep) -> LLMPort:
 LLMDep = Annotated[LLMPort, Depends(get_llm)]
 
 
+def get_title_generator(settings: SettingsDep) -> TitleGeneratorPort:
+    return OpenRouterTitleGenerator(
+        api_key=settings.openrouter_api_key.get_secret_value(),
+        base_url=settings.openrouter_base_url,
+        model=settings.openrouter_model,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+
+
+TitleGeneratorDep = Annotated[TitleGeneratorPort, Depends(get_title_generator)]
+
+
 def get_chat_service(
-    store: ConversationStoreDep, llm: LLMDep, settings: SettingsDep
+    store: ConversationStoreDep,
+    llm: LLMDep,
+    titles: TitleGeneratorDep,
+    settings: SettingsDep,
 ) -> ChatService:
     return ChatService(
         store=store,
         llm=llm,
         history_limit=settings.history_limit,
         max_message_length=settings.max_message_length,
+        titles=titles if settings.generate_titles else None,
     )
 
 

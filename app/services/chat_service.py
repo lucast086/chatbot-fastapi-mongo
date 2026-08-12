@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.domain.errors import NotFoundError, ProviderUnavailableError, ValidationError
 from app.domain.models import Conversation, Message, MessageRole
-from app.domain.ports import ConversationStorePort, LLMPort
+from app.domain.ports import ConversationStorePort, LLMPort, TitleGeneratorPort
 from app.services.conversation_service import DEFAULT_TITLE, derive_title
 
 
@@ -24,11 +24,15 @@ class ChatService:
         llm: LLMPort,
         history_limit: int,
         max_message_length: int,
+        titles: TitleGeneratorPort | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         self._history_limit = history_limit
         self._max_message_length = max_message_length
+        # Optional: without it, conversations keep the title derived from their
+        # first message, which is already good enough to navigate by.
+        self._titles = titles
 
     async def send_message(
         self, conversation_id: str, content: str
@@ -107,6 +111,16 @@ class ChatService:
             title = derive_title(prepared.user_message.content)
 
         await self._store.add_turn([prepared.user_message, assistant_message], title=title)
+
+        # After the turn is safely stored, never before. A better title is a
+        # nicety; the turn is the product, and one must not be able to cost the
+        # other. Only for the turn that named the conversation.
+        if title is not None and self._titles is not None:
+            suggested = await self._titles.suggest_title(prepared.user_message.content, text)
+            if suggested:
+                await self._store.rename_conversation(
+                    prepared.conversation.id, derive_title(suggested)
+                )
 
         updated = await self._store.get_conversation(prepared.conversation.id)
         return prepared.user_message, assistant_message, updated or prepared.conversation

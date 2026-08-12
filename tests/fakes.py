@@ -47,6 +47,16 @@ class FakeConversationStore:
             model=last.model or conversation.model,
         )
 
+    async def rename_conversation(self, conversation_id: str, title: str) -> None:
+        current = self.conversations[conversation_id]
+        self.conversations[conversation_id] = Conversation(
+            id=current.id,
+            title=title,
+            created_at=current.created_at,
+            updated_at=current.updated_at,
+            model=current.model,
+        )
+
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
         return self._for(conversation_id)[-limit:]
 
@@ -77,3 +87,15 @@ class FakeLLM:
         # single chunk would let a broken join pass unnoticed.
         for chunk in self._reply.split(" "):
             yield chunk + " "
+
+
+class FakeTitleGenerator:
+    """Returns a fixed title, or None to stand in for a provider that failed."""
+
+    def __init__(self, title: str | None = "A generated title") -> None:
+        self._title = title
+        self.calls = 0
+
+    async def suggest_title(self, question: str, answer: str) -> str | None:
+        self.calls += 1
+        return self._title

@@ -35,6 +35,7 @@ services:
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
       HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
+      GENERATE_TITLES: ${GENERATE_TITLES:-true}
     # Published as well as proxied, so Swagger UI at /docs and a direct curl
     # are available without going through nginx. Set API_PORT to change it if
     # something else is already on 8000.

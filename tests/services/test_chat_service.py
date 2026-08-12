@@ -17,7 +17,7 @@ from app.domain.errors import (
 )
 from app.domain.models import Conversation, MessageRole
 from app.services.chat_service import ChatService
-from tests.fakes import FakeConversationStore, FakeLLM
+from tests.fakes import FakeConversationStore, FakeLLM, FakeTitleGenerator
 
 
 @pytest.fixture
@@ -224,3 +224,63 @@ async def test_sending_to_an_unknown_conversation_is_not_found(
         await service.send_message("does-not-exist", "hi")
 
     assert llm.received == []
+
+
+# --- generated titles -------------------------------------------------------
+
+
+async def test_a_generated_title_replaces_the_derived_one(
+    store: FakeConversationStore,
+) -> None:
+    service = ChatService(
+        store=store,
+        llm=FakeLLM(),
+        history_limit=20,
+        max_message_length=8000,
+        titles=FakeTitleGenerator("Making carbonara"),
+    )
+
+    await service.send_message("c1", "How do I make carbonara?")
+
+    assert store.conversations["c1"].title == "Making carbonara"
+
+
+async def test_a_failed_title_leaves_the_derived_one_in_place(
+    store: FakeConversationStore,
+) -> None:
+    """The whole point of the port returning None instead of raising: the turn
+    has already been answered and stored, and a nicety must not undo that."""
+    service = ChatService(
+        store=store,
+        llm=FakeLLM(reply="Guanciale."),
+        history_limit=20,
+        max_message_length=8000,
+        titles=FakeTitleGenerator(None),
+    )
+
+    _, assistant, _ = await service.send_message("c1", "How do I make carbonara?")
+
+    assert store.conversations["c1"].title == "How do I make carbonara?"
+    assert assistant.content == "Guanciale."
+    assert len(store.messages) == 2
+
+
+async def test_titles_are_only_generated_for_the_first_turn(
+    store: FakeConversationStore,
+) -> None:
+    titles = FakeTitleGenerator("Making carbonara")
+    service = ChatService(
+        store=store,
+        llm=FakeLLM(),
+        history_limit=20,
+        max_message_length=8000,
+        titles=titles,
+    )
+    await service.send_message("c1", "How do I make carbonara?")
+
+    await service.send_message("c1", "and the wine?")
+
+    # One call, not two: a later turn must not rename a conversation the user
+    # is already navigating by, and must not spend a request doing it.
+    assert titles.calls == 1
+    assert store.conversations["c1"].title == "Making carbonara"

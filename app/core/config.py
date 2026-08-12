@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # future work.
     history_limit: int = Field(default=20, gt=0)
     max_message_length: int = Field(default=8000, gt=0)
+    # One extra provider call after the first turn of a conversation, to replace
+    # the truncated first message with a real title. Off-switch provided because
+    # it doubles the requests a first turn costs, which matters on a free tier.
+    generate_titles: bool = True
 
     @property
     def provider_configured(self) -> bool:

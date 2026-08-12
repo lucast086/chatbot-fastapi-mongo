@@ -59,6 +59,9 @@ class MongoConversationStore:
         # itself reads correctly because it is loaded from `messages`.
         await self._conversations.update_one({"_id": messages[0].conversation_id}, {"$set": update})
 
+    async def rename_conversation(self, conversation_id: str, title: str) -> None:
+        await self._conversations.update_one({"_id": conversation_id}, {"$set": {"title": title}})
+
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
         cursor = (
             self._messages.find({"conversation_id": conversation_id})
