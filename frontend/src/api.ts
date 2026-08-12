@@ -103,3 +103,59 @@ export const api = {
       body: JSON.stringify({ content }),
     }),
 };
+
+/**
+ * Server-sent events for a streamed answer.
+ *
+ * Pre-flight failures (unknown conversation, invalid message, missing key)
+ * still arrive as a normal HTTP error, so they are thrown exactly like the JSON
+ * route's. Only a failure that happens mid-generation comes back as an `error`
+ * event — carrying the same four fields, so `onError` handles both.
+ */
+export async function streamMessage(
+  conversationId: string,
+  content: string,
+  handlers: {
+    onChunk: (text: string) => void;
+    onDone: (info: { title: string }) => void;
+    onError: (error: ChatApiError) => void;
+  },
+): Promise<void> {
+  const response = await fetch(`${BASE}/conversations/${conversationId}/messages/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!response.ok || !response.body) {
+    const detail = (await response.json()) as ApiError;
+    throw new ChatApiError(detail, response.status, null);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // Events are separated by a blank line. A chunk can split one in half, so
+    // the tail stays in the buffer until its terminator arrives.
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+
+    for (const block of blocks) {
+      const nameLine = block.split("\n").find((l) => l.startsWith("event: "));
+      const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
+      if (!nameLine || !dataLine) continue;
+      const name = nameLine.slice(7);
+      const data = JSON.parse(dataLine.slice(6));
+
+      if (name === "chunk") handlers.onChunk(data.content as string);
+      else if (name === "done") handlers.onDone({ title: data.title as string });
+      else if (name === "error") handlers.onError(new ChatApiError(data as ApiError, 200, null));
+    }
+  }
+}

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
   ChatApiError,
+  streamMessage,
   type AppConfig,
   type ConversationSummary,
   type Message,
@@ -87,16 +88,54 @@ export default function App() {
     setSending(true);
     setError(null);
     try {
-      const result = await api.sendMessage(conversationId, content);
-      setMessages((current) => [...current, result.user_message, result.assistant_message]);
-      // Clear only after the turn succeeded. The backend persisted nothing on
-      // failure, so the text in the box is the retry.
+      if (config?.streaming_enabled) {
+        await sendStreaming(conversationId, content);
+      } else {
+        const result = await api.sendMessage(conversationId, content);
+        setMessages((current) => [...current, result.user_message, result.assistant_message]);
+      }
+      // Cleared only after the turn succeeded. The backend persisted nothing on
+      // failure, so the text still in the box is the retry.
       setDraft("");
       await refreshConversations();
     } catch (caught) {
       setError(caught as ChatApiError);
     } finally {
       setSending(false);
+    }
+  }
+
+  async function sendStreaming(conversationId: string, content: string) {
+    const userMessage: Message = {
+      id: `local-${Date.now()}`,
+      role: "user",
+      content,
+      created_at: new Date().toISOString(),
+    };
+    const pendingId = `local-${Date.now()}-a`;
+    setMessages((current) => [
+      ...current,
+      userMessage,
+      { id: pendingId, role: "assistant", content: "", created_at: userMessage.created_at },
+    ]);
+
+    let failure: ChatApiError | null = null;
+    await streamMessage(conversationId, content, {
+      onChunk: (text) =>
+        setMessages((current) =>
+          current.map((m) => (m.id === pendingId ? { ...m, content: m.content + text } : m)),
+        ),
+      onDone: () => undefined,
+      onError: (caught) => {
+        failure = caught;
+      },
+    });
+
+    if (failure) {
+      // The backend stored nothing, so the optimistic pair has to come back out
+      // rather than sit there looking persisted.
+      setMessages((current) => current.filter((m) => m.id !== pendingId && m.id !== userMessage.id));
+      throw failure;
     }
   }
 

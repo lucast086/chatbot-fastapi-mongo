@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from app.adapters.mongo.connection import create_client, ensure_indexes
 from app.api.errors import DOCS_BASE_URL, register_exception_handlers
 from app.api.routers.conversations import router as conversations_router
+from app.api.routers.streaming import router as streaming_router
 from app.api.schemas import ConfigResponse
 from app.core.config import get_settings
 from app.core.dependencies import DbDep, SettingsDep
@@ -62,6 +63,7 @@ app = FastAPI(
 
 register_exception_handlers(app)
 app.include_router(conversations_router, prefix="/api/v1")
+app.include_router(streaming_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/config", tags=["config"])
@@ -76,7 +78,7 @@ async def read_config(settings: SettingsDep) -> ConfigResponse:
     return ConfigResponse(
         provider_configured=settings.provider_configured,
         model=settings.openrouter_model,
-        streaming_enabled=False,
+        streaming_enabled=True,
         docs_url=DOCS_BASE_URL,
     )
 

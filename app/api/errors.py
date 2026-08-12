@@ -37,6 +37,11 @@ _STATUS_BY_REASON = {
 }
 
 
+def status_for(reason: str) -> int:
+    """The HTTP status a domain reason maps to."""
+    return _STATUS_BY_REASON.get(reason, 500)
+
+
 def error_body(reason: str, message: str, retryable: bool) -> dict[str, Any]:
     return {
         "reason": reason,
@@ -73,7 +78,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             reason=exc.reason,
             message=str(exc),
             retryable=exc.retryable,
-            status_code=_STATUS_BY_REASON.get(exc.reason, 500),
+            status_code=status_for(exc.reason),
             headers=headers,
         )
 

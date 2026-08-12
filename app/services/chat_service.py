@@ -7,6 +7,8 @@ safe without an idempotency key.
 """
 
 import uuid
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from app.domain.errors import NotFoundError, ProviderUnavailableError, ValidationError
@@ -31,6 +33,17 @@ class ChatService:
     async def send_message(
         self, conversation_id: str, content: str
     ) -> tuple[Message, Message, Conversation]:
+        prepared = await self.prepare_turn(conversation_id, content)
+        answer = "".join([chunk async for chunk in self.stream_turn(prepared)])
+        return await self.finish_turn(prepared, answer)
+
+    async def prepare_turn(self, conversation_id: str, content: str) -> "PreparedTurn":
+        """Everything that can fail before the model is called.
+
+        Split out so the streaming route can run these checks while a real HTTP
+        status code is still possible — once a stream opens, the status line has
+        already been sent.
+        """
         text = self._validate(content)
 
         conversation = await self._store.get_conversation(conversation_id)
@@ -44,37 +57,59 @@ class ChatService:
             conversation_id, limit=max(self._history_limit - 1, 0)
         )
 
-        now = datetime.now(UTC)
         user_message = Message(
             id=str(uuid.uuid4()),
             conversation_id=conversation_id,
             role=MessageRole.USER,
             content=text,
-            created_at=now,
+            created_at=datetime.now(UTC),
+        )
+        return PreparedTurn(
+            conversation=conversation,
+            history=history,
+            user_message=user_message,
         )
 
-        answer = await self._generate([*history, user_message])
+    async def stream_turn(self, prepared: "PreparedTurn") -> AsyncIterator[str]:
+        """Yield the answer as it arrives. Nothing is persisted here."""
+        async for chunk in self._llm.stream([*prepared.history, prepared.user_message]):
+            yield chunk
+
+    async def finish_turn(
+        self, prepared: "PreparedTurn", answer: str
+    ) -> tuple[Message, Message, Conversation]:
+        """Persist the completed turn. The only place that writes.
+
+        Called after the answer is fully known, which is what makes a failed
+        generation leave nothing behind.
+        """
+        text = answer.strip()
+        if not text:
+            # Storing an empty assistant message would look like a successful
+            # turn that answered nothing, which is worse than a clear failure
+            # the user can retry.
+            raise ProviderUnavailableError("the provider returned an empty answer")
 
         assistant_message = Message(
             id=str(uuid.uuid4()),
-            conversation_id=conversation_id,
+            conversation_id=prepared.user_message.conversation_id,
             # A millisecond later so ordering by created_at is deterministic
             # even when both writes land inside the same clock tick.
-            created_at=now + timedelta(milliseconds=1),
+            created_at=prepared.user_message.created_at + timedelta(milliseconds=1),
             role=MessageRole.ASSISTANT,
-            content=answer,
+            content=text,
         )
 
         # Only name a conversation that has not been named. A later turn must
         # not rewrite a title the user is already navigating by.
         title = None
-        if conversation.title == DEFAULT_TITLE and not history:
-            title = derive_title(text)
+        if prepared.conversation.title == DEFAULT_TITLE and not prepared.history:
+            title = derive_title(prepared.user_message.content)
 
-        await self._store.add_turn([user_message, assistant_message], title=title)
+        await self._store.add_turn([prepared.user_message, assistant_message], title=title)
 
-        updated = await self._store.get_conversation(conversation_id)
-        return user_message, assistant_message, updated or conversation
+        updated = await self._store.get_conversation(prepared.conversation.id)
+        return prepared.user_message, assistant_message, updated or prepared.conversation
 
     def _validate(self, content: str) -> str:
         text = content.strip()
@@ -87,12 +122,16 @@ class ChatService:
             )
         return text
 
-    async def _generate(self, context: list[Message]) -> str:
-        chunks = [chunk async for chunk in self._llm.stream(context)]
-        answer = "".join(chunks).strip()
-        if not answer:
-            # Storing an empty assistant message would look like a successful
-            # turn that answered nothing, which is worse than a clear failure
-            # the user can retry.
-            raise ProviderUnavailableError("the provider returned an empty answer")
-        return answer
+
+@dataclass(frozen=True)
+class PreparedTurn:
+    """A validated turn that has not been generated or persisted yet.
+
+    Exists so the streaming route can complete its pre-flight checks and then
+    hand the rest of the work off, without either route duplicating the other's
+    logic.
+    """
+
+    conversation: Conversation
+    history: list[Message]
+    user_message: Message
