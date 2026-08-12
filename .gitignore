@@ -1,0 +1,40 @@
+# --- Local tooling, not part of the deliverable -----------------------------
+# Editor/agent configuration and spec-workflow scaffolding. The outputs that
+# matter (docs/specs/conversations.md, CLAUDE.md) are tracked; the machinery
+# that produces them is not.
+.claude/
+sasa/
+docs/specs/TEMPLATE.md
+
+# --- Secrets ----------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- Tooling caches ---------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.import_linter_cache/
+
+# --- Coverage ---------------------------------------------------------------
+.coverage
+.coverage.*
+htmlcov/
+junit.xml
+
+# --- Frontend ---------------------------------------------------------------
+node_modules/
+dist/
+*.local
+
+# --- Editors ----------------------------------------------------------------
+.idea/
+.DS_Store
