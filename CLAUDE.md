@@ -6,8 +6,8 @@ A chatbot: you type a message, a language model answers, and the conversation is
 persisted so it can be resumed later. Built as a 48-hour take-home challenge, so
 the bar is "small, tidy and well reasoned", not "large and half finished".
 
-**Stack:** Python 3.13 · FastAPI · MongoDB · React + Vite (served by nginx) ·
-OpenRouter through the OpenAI SDK.
+**Stack:** Python 3.13 (managed by `uv`) · FastAPI · MongoDB · React + Vite
+(served by nginx) · OpenRouter through the OpenAI SDK.
 
 **How it runs:** `docker compose up` from a clean clone. One port. Every
 environment variable has a working default except the model provider API key.
@@ -108,11 +108,14 @@ Break any of these and the design breaks with it.
 
 ```bash
 # TEST_COMMAND
-poetry run pytest
+uv run pytest
 
 # LINT_COMMAND
-poetry run ruff format --check && poetry run ruff check && poetry run mypy && poetry run lint-imports
+uv run ruff format --check && uv run ruff check && uv run mypy && uv run lint-imports
 ```
+
+`scripts/test.sh` and `scripts/lint.sh` wrap these. Dependencies come from
+`uv.lock` — run `uv sync` after pulling a change to it.
 
 Run both before every commit. Live tests that hit the real provider are marked
 `@pytest.mark.live` and are skipped unless `OPENROUTER_API_KEY` is set; they

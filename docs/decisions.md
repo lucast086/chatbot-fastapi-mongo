@@ -275,6 +275,29 @@ development experience would matter more than the reviewer's first run.
 
 ---
 
+## `uv` for the Python toolchain
+
+**Context.** The project targets Python 3.13. Getting that interpreter plus a
+dependency manager onto a machine is the first thing anyone reproducing this has
+to do, and the obvious routes each cost something: a third-party APT repository
+needs `sudo`, and `pyenv` compiles the interpreter from source.
+
+**Decision.** `uv` provides both — it downloads the interpreter and resolves,
+locks and installs dependencies.
+
+**Why.** One binary, no `sudo`, no compilation, and `uv.lock` pins the full
+transitive tree the way a lock file should. It is also fast enough that
+reinstalling the environment is not a thing you avoid doing. The alternative
+considered was Poetry, which is equally capable at the dependency half but does
+nothing about the interpreter, so it would have needed one of the two costly
+routes above alongside it.
+
+**When this would NOT apply.** In an organisation standardised on Poetry or Pipenv
+with existing tooling built around them, being the one project that is different
+costs more than the setup it saves.
+
+---
+
 ## Architecture rules are enforced by CI, not by convention
 
 **Context.** Layered architecture tends to erode: a service imports an adapter

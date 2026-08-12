@@ -1,0 +1,133 @@
+[project]
+name = "chatbot"
+version = "0.1.0"
+description = "A chatbot with FastAPI and MongoDB: send a message, a model answers, the conversation is persisted and can be resumed."
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+dependencies = [
+    "fastapi>=0.136,<0.137",
+    "uvicorn[standard]>=0.46,<0.47",
+    "pydantic>=2.11,<3.0",
+    "pydantic-settings>=2.14,<3.0",
+    # pymongo, not motor: motor is deprecated (EOL 2026-05-14) and the official
+    # async driver now ships inside pymongo as AsyncMongoClient.
+    "pymongo>=4.17,<5.0",
+    # The OpenAI SDK pointed at OpenRouter's base URL. OpenRouter exposes an
+    # OpenAI-compatible API, so this is the SDK, not a dependency on OpenAI.
+    "openai>=2.14,<3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0,<10.0",
+    "pytest-asyncio>=1.3,<2.0",
+    "pytest-cov>=7.1,<8.0",
+    "httpx>=0.28,<0.29",
+    "ruff>=0.15,<0.16",
+    "mypy>=1.18,<2.0",
+    "import-linter>=2.3,<3.0",
+    "pre-commit>=4.6,<5.0",
+    "bandit>=1.9,<2.0",
+    "pip-audit>=2.10,<3.0",
+]
+
+[tool.uv]
+package = false
+
+
+# ---------------------------------------------------------------------------
+# Ruff: formatter and linter
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# "." and not ["app"]: src lists directories to search *for* modules. Pointing
+# it at app/ would make ruff resolve `main` instead of `app.main`, and
+# first-party imports would be misclassified as third-party.
+src = ["."]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use unconventional fixture names.
+"tests/**" = ["N802", "N803"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+strict = true
+warn_unreachable = true
+pretty = true
+files = ["app", "tests"]
+
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--cov=app --cov-report=term-missing"
+# The project is not installed into the environment (package = false above), so
+# nothing puts the repository root on sys.path by default. Declaring it here
+# rather than relying on PYTHONPATH keeps `pytest` working the same way locally
+# and in CI.
+pythonpath = ["."]
+markers = [
+    # Hits the real provider. Skipped unless OPENROUTER_API_KEY is set, and
+    # never run in CI: the test suite must not depend on an external service,
+    # a network connection or a rate-limited free-tier quota.
+    "live: exercises the real model provider (requires OPENROUTER_API_KEY)",
+]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+
+
+# ---------------------------------------------------------------------------
+# import-linter: the architecture, enforced
+#
+# These three contracts are why the layering described in CLAUDE.md is a fact
+# rather than an intention. They fail the build, not a code review.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Layers point inward: api -> services -> domain"
+type = "layers"
+layers = ["app.api", "app.services", "app.domain"]
+
+[[tool.importlinter.contracts]]
+name = "services never knows a concrete implementation"
+type = "forbidden"
+source_modules = ["app.services"]
+forbidden_modules = ["app.adapters", "app.api", "app.core"]
+
+[[tool.importlinter.contracts]]
+name = "domain is pure: it depends on nothing else in the project"
+type = "forbidden"
+source_modules = ["app.domain"]
+forbidden_modules = ["app.adapters", "app.services", "app.api", "app.core"]
