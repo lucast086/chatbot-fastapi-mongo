@@ -1,7 +1,7 @@
 # Conversation flow — Spec
 
 **Location**: `app/services/chat_service.py`
-**Status**: `in-progress`
+**Status**: `stable`
 **Last updated**: 2026-08-12
 
 Written before the code that implements it. This describes WHAT the conversation
@@ -126,7 +126,10 @@ obvious blast radius in the suite.
 | 13 | An empty or whitespace-only message is rejected before any model call | `test_an_empty_message_is_rejected_before_any_model_call`, `test_an_empty_message_is_rejected_by_the_schema` |
 | 14 | Sending to an unknown conversation is reported as not found | `test_sending_to_an_unknown_conversation_is_not_found`, `test_sending_to_an_unknown_conversation_is_404` |
 | 15 | An empty answer from the provider does not produce a stored turn | `test_an_empty_answer_does_not_produce_a_stored_turn` |
+| 16 | A generated title never costs a turn | `test_a_failed_title_leaves_the_derived_one_in_place`, `test_titles_are_only_generated_for_the_first_turn` |
+| 17 | A streamed turn is persisted only when the stream completes | `test_a_streamed_turn_is_persisted_when_the_stream_completes`, `test_a_failure_during_generation_persists_nothing` |
+| 18 | A pre-flight failure on the stream route keeps a real status code | `test_a_failure_before_the_stream_opens_is_a_real_status_code`, `test_an_invalid_message_is_a_real_status_code` |
 
-**Result: 15 of 15 mapped.** Criteria 3, 7, 8 and 9 are covered twice on
+**Result: 18 of 18 mapped.** Criteria 3, 7, 8 and 9 are covered twice on
 purpose — once against a fake store and once against a real MongoDB, because a
 fake can satisfy the service's expectations while the adapter does not.

@@ -2,35 +2,284 @@
 
 [![CI](https://github.com/lucast086/chatbot-fastapi-mongo/actions/workflows/ci.yml/badge.svg)](https://github.com/lucast086/chatbot-fastapi-mongo/actions/workflows/ci.yml)
 
-A chatbot: you type a message, a language model answers, and the conversation is
-persisted so it can be resumed later.
+You type a message, a language model answers, and the conversation is persisted
+so it can be resumed later.
 
 **Stack:** Python 3.13 · FastAPI · MongoDB · React + Vite served by nginx ·
 OpenRouter through the OpenAI SDK.
 
-> **Status: in progress.** Setup instructions, the API reference and the
-> troubleshooting guide land as the corresponding pieces are built. Scope and
-> decisions are already documented below.
+---
+
+## Run it
+
+You need Docker with Compose v2. Nothing else.
+
+```bash
+git clone <this-repo>
+cd chatbot-fastapi-mongo
+docker compose up
+```
+
+Then open **<http://localhost:8080>**.
+
+That works with no configuration at all: MongoDB starts, the UI loads, and you
+can create, list and delete conversations. What you cannot do yet is get an
+answer — the app tells you so with a banner instead of failing.
+
+### Add a model provider key
+
+```bash
+cp .env.example .env
+# put your key in OPENROUTER_API_KEY
+docker compose up -d
+```
+
+Get a free key at <https://openrouter.ai/keys>. No card is required for the
+`:free` models this project defaults to.
+
+### Try it
+
+Chat in the browser, or from the terminal:
+
+```bash
+# create a conversation
+curl -X POST http://localhost:8080/api/v1/conversations \
+  -H 'Content-Type: application/json' -d '{}'
+
+# send a message (use the id from above)
+curl -X POST http://localhost:8080/api/v1/conversations/<id>/messages \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"What is the difference between guanciale and pancetta?"}'
+```
+
+Interactive API docs: <http://localhost:8000/docs>.
+
+**Check that it persists:** send a message, then `docker compose down &&
+docker compose up -d`, reload the page. The conversation is still there.
+`docker compose down -v` is what wipes it.
 
 ---
 
+## What it does
+
+- Multiple conversations: create, list, open, delete
+- Answers with conversation history as context, bounded by a configurable window
+- Conversations are named from the first message, then renamed by the model
+- Answers stream token by token over server-sent events
+- Typed provider errors with a single response envelope and a retry hint
+- Runs and stays usable with no API key configured
+- Conversations survive `docker compose down` + `up`
+
+### What it deliberately does not do
+
+Retrieval-augmented generation, authentication, message editing, answer
+regeneration, conversation renaming by hand, or a model picker in the UI. Each
+was considered and cut; the reasoning is in [`docs/plan.md`](docs/plan.md).
+
+---
+
+## Configuration
+
+Every variable has a working default. The API key is the only exception, and its
+absence degrades the app rather than stopping it.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `OPENROUTER_API_KEY` | *(empty)* | The only one without a usable default |
+| `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` | Free models rotate — see [`model_unavailable`](#troubleshooting-model-unavailable) |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint, including a local one |
+| `HISTORY_LIMIT` | `20` | Messages sent as context. A count, not a token budget |
+| `GENERATE_TITLES` | `true` | One extra call after the first turn. `false` halves what a first turn costs |
+| `WEB_PORT` | `8080` | The port you open |
+| `API_PORT` | `8000` | Published for Swagger UI and curl; not needed to use the app |
+| `MONGO_PORT` | `27017` | Published for `mongosh`; not needed either |
+
+Using a different provider only needs `OPENROUTER_BASE_URL` and
+`OPENROUTER_MODEL` — the adapter talks the OpenAI wire format, so a local
+Ollama or LM Studio works without a code change.
+
+---
+
+## Troubleshooting
+
+Every error response carries a `docs_url` pointing at the matching section here.
+
+```json
+{
+  "reason": "rate_limited",
+  "message": "The model provider is rate limiting requests. Try again shortly.",
+  "retryable": true,
+  "docs_url": "…#troubleshooting-rate-limited"
+}
+```
+
+### troubleshooting-missing-api-key
+
+**503.** No key is configured. Everything except generation works — this is the
+expected state on a fresh clone, not a fault.
+
+`cp .env.example .env`, set `OPENROUTER_API_KEY`, then `docker compose up -d`.
+
+### troubleshooting-invalid-credentials
+
+**502.** The provider rejected the key. Retrying will not help. Check for a
+truncated paste or stray quotes, and that the key is still active at
+<https://openrouter.ai/keys>. A key that is valid but has no access to the
+configured model reports the same way — the fix is the same, correct the
+configuration.
+
+### troubleshooting-rate-limited
+
+**429**, with `Retry-After` when the provider sends one. Free-tier models are
+rate limited per model, so this is normal rather than exceptional — expect it if
+you send several messages quickly.
+
+Wait and retry, or switch `OPENROUTER_MODEL` to another free model: the limit
+applies per model, so a different one is usually available immediately.
+
+Nothing was saved. Your message is still in the composer, and sending it again
+is the retry.
+
+### troubleshooting-model-unavailable
+
+**502.** The configured model does not exist or has stopped being free.
+OpenRouter rotates and retires its `:free` models regularly, so this is the most
+likely failure if you run this repository some time after it was written.
+
+Pick a current one from <https://openrouter.ai/models?q=free> and set
+`OPENROUTER_MODEL`. The error message includes the provider's own suggestion
+when it offers one.
+
+### troubleshooting-provider-unavailable
+
+**504.** A timeout, a connection failure, or an error on the provider's side.
+Retryable. If it persists, check <https://status.openrouter.ai>.
+
+### troubleshooting-not-found
+
+**404.** The conversation does not exist — usually a stale browser tab pointing
+at something that was deleted. Reload.
+
+### troubleshooting-validation-error
+
+**422.** The message was empty, whitespace only, or longer than 8000 characters.
+
+### troubleshooting-internal-error
+
+**500.** Something the application did not anticipate. This one is a bug rather
+than a configuration problem — `docker compose logs api` will have the
+traceback, which is deliberately not sent in the response.
+
+### Other problems
+
+**Port already in use.** Set `WEB_PORT`, `API_PORT` or `MONGO_PORT` in `.env`.
+
+**The page loads but nothing works.** Check `curl
+http://localhost:8080/health/ready`. `"status":"unavailable"` means MongoDB is
+not reachable; `docker compose logs mongo` will say why.
+
+**Conversations disappeared.** `docker compose down -v` removes the volume.
+Plain `down` does not.
+
+---
+
+## Development
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # if you do not have uv
+uv sync
+
+./scripts/test.sh    # tests (starts MongoDB, stops it if it started it)
+./scripts/lint.sh    # ruff, mypy --strict, import-linter
+```
+
+Tests need neither an API key nor a network. The one test that talks to the real
+provider is marked `live`, skipped without a key, and excluded from CI:
+
+```bash
+uv run pytest -m live    # needs OPENROUTER_API_KEY
+```
+
+### Architecture
+
+```
+app/api/       HTTP: routers, schemas, the single error envelope
+app/services/  business logic — knows ports, never implementations
+app/domain/    entities, errors, Protocol ports. Pure Python.
+app/adapters/  MongoDB and OpenRouter. The only code aware of a technology.
+app/core/      configuration and dependency wiring
+```
+
+Three `import-linter` contracts enforce this in CI rather than by convention:
+layers point inward, `services` cannot import `adapters`, and `domain` imports
+nothing else in the project. The build fails if any of them is broken, which is
+what makes this description a fact rather than an intention.
+
+---
+
+## Decisions and trade-offs
+
+The reasoning behind every non-obvious choice, each with the case where it would
+be the wrong call, is in [`docs/decisions.md`](docs/decisions.md). The four that
+shape the system most:
+
+**A failed generation persists nothing.** The model is called first and both
+messages are written afterwards in a single command. The alternative — saving
+the question first — produces conversations ending in an unanswered message and
+needs an idempotency key so retrying does not duplicate it. Not writing removes
+both problems. The cost is that a client disconnecting mid-stream loses that
+turn.
+
+**No transactions, and none needed.** MongoDB runs standalone, so multi-document
+transactions are unavailable. What protects the history is the order of
+operations, not a transaction: the only write left outside the atomic pair is
+the conversation's last-activity timestamp, whose worst case is one row briefly
+out of order in the sidebar.
+
+**The sidebar shows titles only.** Adding a message preview means either copying
+data onto the conversation on every turn, or a lookup pipeline at read time.
+Dropping the requirement removed both instead of choosing between them.
+
+**Five provider errors, not one.** The backend knows which failure occurred and
+only some are worth retrying, so `retryable` in the envelope carries that and
+the frontend needs no table of status codes. The fifth,
+[`model_unavailable`](#troubleshooting-model-unavailable), was added after a
+live test caught the default model in this repository having already been
+retired — four categories looked complete until something real disagreed.
+
+### With more time
+
+- A token-based history budget instead of a message count. The window is the
+  first thing that breaks on long conversations with a small context model.
+- Cursor pagination on the message list. Loading an entire conversation is fine
+  at this size and will not stay fine.
+- A frontend test suite. There is none: the backend is what the brief says it
+  cares about, and with the clock running that is where the tests went.
+- Structured logging with request ids, and metrics. Right now debugging a
+  provider failure means reading container logs.
+- Trivy on the built images in CI, and a non-root nginx.
+- Authentication: `owner_id` on the conversation, a compound index, and one
+  dependency that filters every query. Nothing in the domain would change.
+
+---
+
+## AI usage
+
+Which tools, where they helped, and — the part that actually says something —
+seven suggestions I turned down and why:
+[`docs/ai-usage.md`](docs/ai-usage.md).
+
+The short version: the pattern in what I rejected is the AI optimising a
+solution instead of questioning the requirement. The clearest case is the
+sidebar, where two rounds of increasingly clever design disappeared the moment
+someone asked why it needed to show anything beyond a title.
+
 ## Documentation
 
-| Document | What is in it |
+| Document | Contents |
 |---|---|
-| [`docs/plan.md`](docs/plan.md) | What is in scope, what was deliberately left out and why, and how the ambiguities in the brief were resolved. |
-| [`docs/decisions.md`](docs/decisions.md) | One entry per design decision: context, decision, reasoning, and when the same choice would be wrong. |
-| [`docs/ai-usage.md`](docs/ai-usage.md) | Which AI tools were used and how — including every suggestion that was rejected, with the reason. |
-| [`docs/challenge.md`](docs/challenge.md) | The original brief. |
-
-## In short
-
-Built: multiple conversations with create/list/open/delete, message turns
-persisted to MongoDB, a bounded history window sent to the model, typed provider
-errors with a single response envelope, and a startup path that works with no API
-key configured — the app boots, everything except generation works, and it says
-so instead of throwing a stack trace.
-
-Deliberately not built: retrieval-augmented generation, authentication,
-message editing, and conversation renaming. The reasoning for each is in
-[`docs/plan.md`](docs/plan.md).
+| [`docs/plan.md`](docs/plan.md) | Scope, what was cut, and how the brief's ambiguities were resolved |
+| [`docs/decisions.md`](docs/decisions.md) | One entry per decision: context, choice, reasoning, and when it would be wrong |
+| [`docs/ai-usage.md`](docs/ai-usage.md) | Tooling, process, and every rejected suggestion |
+| [`docs/specs/conversations.md`](docs/specs/conversations.md) | Behaviour spec for the conversation flow, written before the code, with each criterion mapped to its test |
+| [`docs/challenge.md`](docs/challenge.md) | The original brief |
