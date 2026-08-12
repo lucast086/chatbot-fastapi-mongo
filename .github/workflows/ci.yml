@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the run still in progress. Without
+# this, a burst of commits queues runs that are obsolete before they finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.3"
+
+jobs:
+  quality:
+    name: Lint, types and architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      # --frozen: fail if uv.lock and pyproject.toml have drifted, rather than
+      # testing a dependency set nobody has locally.
+      - run: uv sync --frozen
+      - run: uv run ruff format --check
+      - run: uv run ruff check
+      - run: uv run mypy
+      # The three architecture contracts. This is why the layering in CLAUDE.md
+      # is a fact rather than an intention.
+      - run: uv run lint-imports
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval db.adminCommand('ping')"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_MONGO_URI: mongodb://localhost:27017
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      # -m "not live" excludes the one test that talks to the real model
+      # provider. CI must not depend on an external service, a secret or a
+      # rate-limited free-tier quota; that test is run deliberately, by hand.
+      - run: uv run pytest -m "not live"
+
+  security:
+    name: Dependencies and secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan it, not just the current tree.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pip-audit
+      - run: uv run bandit -r app
+      - name: gitleaks
+        # The gitleaks binary directly rather than the vendor action, which
+        # gates on a licence key for private repositories.
+        run: |
+          curl -sSL -o gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks detect --source . --no-banner --redact
+
+  build:
+    name: Container images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Both images, because "it builds on my machine" is exactly the failure
+      # this catches. The frontend build also runs tsc, so a type error there
+      # fails here too.
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    name: docker compose up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The claim the brief cares about most: a clean clone with no .env, one
+      # command, and a working app. Asserted here rather than trusted.
+      - name: Start the stack with no .env present
+        run: docker compose up -d --build --wait
+      - name: The app is served and reports a missing key rather than crashing
+        run: |
+          set -euo pipefail
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" = "200"
+          curl -sf http://localhost:8080/api/v1/config | tee /dev/stderr | grep -q '"provider_configured":false'
+          curl -sf http://localhost:8080/health/ready | tee /dev/stderr | grep -q '"status":"degraded"'
+      - name: Conversations work without a model provider
+        run: |
+          set -euo pipefail
+          id=$(curl -sf -X POST http://localhost:8080/api/v1/conversations \
+                 -H 'Content-Type: application/json' -d '{}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+          curl -sf "http://localhost:8080/api/v1/conversations/$id" >/dev/null
+          # Sending a message must be a typed 503, not a stack trace.
+          body=$(curl -s -o /tmp/body -w '%{http_code}' -X POST \
+                   "http://localhost:8080/api/v1/conversations/$id/messages" \
+                   -H 'Content-Type: application/json' -d '{"content":"hi"}')
+          cat /tmp/body
+          test "$body" = "503"
+          grep -q '"reason":"missing_api_key"' /tmp/body
+      - name: Conversations survive a restart
+        run: |
+          set -euo pipefail
+          before=$(curl -sf http://localhost:8080/api/v1/conversations | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')
+          docker compose down
+          docker compose up -d --wait
+          after=$(curl -sf http://localhost:8080/api/v1/conversations | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')
+          echo "conversations before=$before after=$after"
+          test "$before" = "$after"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs

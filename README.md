@@ -1,5 +1,7 @@
 # Chatbot — FastAPI + MongoDB
 
+[![CI](https://github.com/lucast086/chatbot-fastapi-mongo/actions/workflows/ci.yml/badge.svg)](https://github.com/lucast086/chatbot-fastapi-mongo/actions/workflows/ci.yml)
+
 A chatbot: you type a message, a language model answers, and the conversation is
 persisted so it can be resumed later.
 
