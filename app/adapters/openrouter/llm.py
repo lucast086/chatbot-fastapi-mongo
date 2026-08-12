@@ -20,6 +20,7 @@ from app.domain.errors import (
     InvalidCredentialsError,
     MissingApiKeyError,
     ModelUnavailableError,
+    ProviderError,
     ProviderUnavailableError,
     RateLimitedError,
 )
@@ -27,18 +28,29 @@ from app.domain.models import Chunk, Message, MessageRole
 
 logger = logging.getLogger(__name__)
 
+# Failures where a *different* model might succeed. InvalidCredentialsError is
+# deliberately absent: it is the same API key for every model, so trying the
+# rest only burns time and delays a clear answer.
+_RECOVERABLE_BY_ANOTHER_MODEL = (
+    RateLimitedError,
+    ModelUnavailableError,
+    ProviderUnavailableError,
+)
+
 
 class OpenRouterLLM:
     def __init__(
         self,
         api_key: str,
         base_url: str,
-        model: str,
+        models: list[str],
         system_prompt: str,
         timeout_seconds: float,
         max_output_tokens: int,
     ) -> None:
-        self._model = model
+        # Tried in order. `:free` models are rate limited per model, so when the
+        # first says 429 the next is usually free to answer immediately.
+        self._models = models
         self._system_prompt = system_prompt
         self._max_output_tokens = max_output_tokens
         # The SDK refuses to construct with an empty key. The service checks
@@ -60,6 +72,46 @@ class OpenRouterLLM:
         if not self._configured:
             raise MissingApiKeyError()
 
+        last_error: ProviderError | None = None
+        for index, model in enumerate(self._models):
+            started = False
+            try:
+                async for chunk in self._stream_one(model, messages):
+                    started = True
+                    yield chunk
+                return
+            except _RECOVERABLE_BY_ANOTHER_MODEL as exc:
+                if started:
+                    # Bytes are already on the wire and cannot be rewound.
+                    # Starting over on another model would duplicate what the
+                    # caller has, so this is a failed turn instead.
+                    raise
+                # Only failures a *different* model might not share. A rejected
+                # key is the same key for all of them, so it is not in this
+                # tuple and propagates on the first attempt — the taxonomy's own
+                # "do not retry what cannot succeed", one level up.
+                last_error = exc
+                remaining = len(self._models) - index - 1
+                logger.warning(
+                    "Model %s failed (%s). %s",
+                    model,
+                    exc.reason,
+                    f"Trying the next of {remaining} remaining."
+                    if remaining
+                    else "No models left.",
+                )
+
+        assert last_error is not None
+        raise last_error
+
+    async def _stream_one(self, model: str, messages: list[Message]) -> AsyncIterator[Chunk]:
+        """One model, no fallback.
+
+        Raises before yielding anything when the model refuses the request,
+        which is what lets the caller move on to the next one. Once a chunk has
+        been yielded there is no going back — bytes are already on the wire —
+        so a mid-stream failure propagates and becomes a failed turn.
+        """
         saw_reasoning_only = False
 
         # Built role by role rather than from `m.role.value`, which is a plain
@@ -83,7 +135,7 @@ class OpenRouterLLM:
             # so without this the provider response waits for garbage
             # collection to be finalised.
             async with await self._client.chat.completions.create(
-                model=self._model,
+                model=model,
                 messages=payload,
                 stream=True,
                 max_tokens=self._max_output_tokens,
@@ -93,7 +145,7 @@ class OpenRouterLLM:
                         continue
                     delta = chunk.choices[0].delta
                     if delta.content:
-                        yield Chunk(text=delta.content, model=self._model)
+                        yield Chunk(text=delta.content, model=model)
                     elif _reasoning_of(delta):
                         # Reasoning models put their tokens in `reasoning` with
                         # `content` null for long stretches. Yielding nothing
@@ -107,7 +159,7 @@ class OpenRouterLLM:
                 logger.warning(
                     "Model %s emitted only reasoning tokens and no answer. "
                     "Reasoning models are not supported; pick another model.",
-                    self._model,
+                    model,
                 )
         except openai.AuthenticationError as exc:
             raise InvalidCredentialsError() from exc
@@ -126,7 +178,7 @@ class OpenRouterLLM:
             # and this was found by the live test rather than reasoned about:
             # the default model shipped in this repo had already been retired.
             if exc.status_code == 404:
-                raise ModelUnavailableError(self._model, _provider_detail(exc)) from exc
+                raise ModelUnavailableError(model, _provider_detail(exc)) from exc
             raise ProviderUnavailableError(f"the provider returned {exc.status_code}") from exc
 
 

@@ -125,7 +125,12 @@ export default function App() {
         setMessages((current) =>
           current.map((m) => (m.id === pendingId ? { ...m, content: m.content + text } : m)),
         ),
-      onDone: () => undefined,
+      onDone: ({ model }) =>
+        // The answering model is only known when the stream closes, since the
+        // backend may have fallen through to a later one.
+        setMessages((current) =>
+          current.map((m) => (m.id === pendingId ? { ...m, model } : m)),
+        ),
       onError: (caught) => {
         failure = caught;
       },
@@ -165,7 +170,13 @@ export default function App() {
             </li>
           ))}
         </ul>
-        {config && <footer className="model">{config.model}</footer>}
+        {config && (
+          <footer className="model" title={config.models.join("\n")}>
+            {config.models.length === 1
+              ? config.models[0]
+              : `${config.models[0]} +${config.models.length - 1} fallback`}
+          </footer>
+        )}
       </aside>
 
       <main>
@@ -187,7 +198,10 @@ export default function App() {
           )}
           {messages.map((message) => (
             <article key={message.id} className={`message ${message.role}`}>
-              <span className="who">{message.role === "user" ? "You" : "Assistant"}</span>
+              <span className="who">
+                {message.role === "user" ? "You" : "Assistant"}
+                {message.model && <em className="by"> · {message.model}</em>}
+              </span>
               <p>{message.content}</p>
             </article>
           ))}

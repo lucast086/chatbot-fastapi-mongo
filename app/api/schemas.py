@@ -40,6 +40,10 @@ class MessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
+    # Which model produced this answer. Present because several are configured
+    # and tried in order — without it a fallback would silently change the
+    # answer's provenance. Always null on user messages.
+    model: str | None = None
 
     @classmethod
     def from_domain(cls, message: Message) -> "MessageOut":
@@ -48,6 +52,7 @@ class MessageOut(BaseModel):
             role=message.role.value,
             content=message.content,
             created_at=message.created_at,
+            model=message.model,
         )
 
 
@@ -101,6 +106,8 @@ class ConfigResponse(BaseModel):
     """What the frontend needs on load to decide whether to show the banner."""
 
     provider_configured: bool
-    model: str
+    # Plural: several are configured and tried in order, so the UI cannot claim
+    # a single one will answer.
+    models: list[str]
     streaming_enabled: bool
     docs_url: str

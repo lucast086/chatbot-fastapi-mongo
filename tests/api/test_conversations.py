@@ -10,11 +10,12 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.dependencies import get_conversation_service
+from app.core.dependencies import get_chat_service, get_conversation_service
 from app.domain.models import Conversation
 from app.main import app
+from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
-from tests.fakes import FakeConversationStore
+from tests.fakes import FakeConversationStore, FakeLLM
 
 
 @pytest.fixture
@@ -136,3 +137,32 @@ def test_the_wrong_verb_is_a_client_error_not_an_internal_one(client: TestClient
     assert response.status_code == 405
     assert response.json()["reason"] == "client_error"
     assert "Allow" in response.headers
+
+
+def test_config_lists_every_configured_model(client: TestClient) -> None:
+    response = client.get("/api/v1/config")
+
+    body = response.json()
+    assert isinstance(body["models"], list)
+    assert body["models"], "at least one model must be configured"
+
+
+def test_a_stored_answer_reports_which_model_produced_it(
+    store: FakeConversationStore, client: TestClient
+) -> None:
+    """With several models tried in order, the answer's provenance has to travel
+    with it — otherwise a fallback silently changes what produced the text."""
+    app.dependency_overrides[get_chat_service] = lambda: ChatService(
+        store=store,
+        llm=FakeLLM(reply="hi", model="second/model"),
+        history_limit=20,
+        max_message_length=8000,
+    )
+    created = client.post("/api/v1/conversations", json={}).json()
+
+    body = client.post(
+        f"/api/v1/conversations/{created['id']}/messages", json={"content": "hello"}
+    ).json()
+
+    assert body["assistant_message"]["model"] == "second/model"
+    assert body["user_message"]["model"] is None

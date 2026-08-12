@@ -40,6 +40,8 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  /** Which model produced this answer. Null on user messages. */
+  model?: string | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {
@@ -49,7 +51,8 @@ export interface ConversationDetail extends ConversationSummary {
 
 export interface AppConfig {
   provider_configured: boolean;
-  model: string;
+  /** Tried in order; the one that answers is reported per message. */
+  models: string[];
   streaming_enabled: boolean;
   docs_url: string;
 }
@@ -119,7 +122,7 @@ export async function streamMessage(
   content: string,
   handlers: {
     onChunk: (text: string) => void;
-    onDone: (info: { title: string }) => void;
+    onDone: (info: { title: string; model: string | null }) => void;
     onError: (error: ChatApiError) => void;
   },
 ): Promise<void> {
@@ -156,7 +159,11 @@ export async function streamMessage(
       const data = JSON.parse(dataLine.slice(6));
 
       if (name === "chunk") handlers.onChunk(data.content as string);
-      else if (name === "done") handlers.onDone({ title: data.title as string });
+      else if (name === "done")
+        handlers.onDone({
+          title: data.title as string,
+          model: (data.model as string) ?? null,
+        });
       else if (name === "error")
         handlers.onError(new ChatApiError(data as ApiError, 200, data.retry_after ?? null));
     }

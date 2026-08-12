@@ -38,7 +38,9 @@ services:
       # everything except message generation works.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
+      # Tried in order. Free models are rate limited per model, so the second
+      # usually answers the moment the first says 429.
+      OPENROUTER_MODELS: ${OPENROUTER_MODELS:-google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,inclusionai/ling-3.0-tiny:free}
       HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
       GENERATE_TITLES: ${GENERATE_TITLES:-true}
     # Published as well as proxied, so Swagger UI at /docs and a direct curl

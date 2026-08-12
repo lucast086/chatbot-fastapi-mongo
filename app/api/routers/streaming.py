@@ -97,6 +97,7 @@ async def stream_message(
                 "title": conversation.title,
                 "user_message_id": prepared.user_message.id,
                 "assistant_message_id": assistant_message.id,
+                "model": assistant_message.model,
             },
         )
 

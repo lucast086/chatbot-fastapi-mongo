@@ -11,6 +11,7 @@ unless a key is present.
 
 import os
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -44,7 +45,7 @@ def _adapter(api_key: str = "sk-test") -> OpenRouterLLM:
     return OpenRouterLLM(
         api_key=api_key,
         base_url="https://openrouter.ai/api/v1",
-        model="test/model",
+        models=["test/model"],
         system_prompt="You are helpful.",
         timeout_seconds=5.0,
         max_output_tokens=256,
@@ -204,7 +205,7 @@ async def test_live_the_configured_model_actually_answers() -> None:
     adapter = OpenRouterLLM(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-        model=os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free"),
+        models=os.getenv("OPENROUTER_MODELS", "google/gemma-4-31b-it:free").split(","),
         system_prompt="Answer with a single word.",
         timeout_seconds=60.0,
         max_output_tokens=64,
@@ -228,3 +229,153 @@ async def test_live_the_configured_model_actually_answers() -> None:
     )
 
     assert answer.strip(), "the provider returned an empty answer"
+
+
+# ---------------------------------------------------------------------------
+# Falling back between models
+#
+# `:free` models are rate limited per model, so when the first says 429 the
+# next is usually free to answer. What these pin down is the boundary: which
+# failures move on, which do not, and that a fallback never hides which model
+# actually replied.
+# ---------------------------------------------------------------------------
+
+
+def _multi(*models: str) -> OpenRouterLLM:
+    return OpenRouterLLM(
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        models=list(models),
+        system_prompt="You are helpful.",
+        timeout_seconds=5.0,
+        max_output_tokens=256,
+    )
+
+
+class _ScriptedProvider:
+    """Answers per model: an exception to raise, or text to stream back."""
+
+    def __init__(self, script: dict[str, object]) -> None:
+        self._script = script
+        self.calls: list[str] = []
+
+    async def create(self, *, model: str, **_kwargs: Any) -> Any:
+        self.calls.append(model)
+        outcome = self._script[model]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _FakeStream(str(outcome))
+
+
+class _FakeStream:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    async def __aenter__(self) -> "_FakeStream":
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def __aiter__(self) -> Any:
+        for word in self._text.split(" "):
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=word + " "))]
+            )
+
+
+def _script(adapter: OpenRouterLLM, script: dict[str, object]) -> _ScriptedProvider:
+    provider = _ScriptedProvider(script)
+    adapter._client.chat.completions.create = provider.create  # type: ignore[method-assign]
+    return provider
+
+
+async def test_a_rate_limited_model_falls_back_to_the_next() -> None:
+    adapter = _multi("first/model", "second/model")
+    provider = _script(
+        adapter,
+        {
+            "first/model": openai.RateLimitError("slow down", response=_response(429), body=None),
+            "second/model": "an answer",
+        },
+    )
+
+    chunks = [c async for c in adapter.stream(_messages())]
+
+    assert "".join(c.text for c in chunks).strip() == "an answer"
+    # The chunk names the model that actually replied, not the configured first.
+    assert {c.model for c in chunks} == {"second/model"}
+    assert provider.calls == ["first/model", "second/model"]
+
+
+async def test_a_retired_model_is_skipped() -> None:
+    """A hardcoded list rots as free models are retired. Treating the 404 as a
+    reason to move on is what stops that rot from breaking the app."""
+    adapter = _multi("retired/model", "live/model")
+    provider = _script(
+        adapter,
+        {
+            "retired/model": openai.APIStatusError("not found", response=_response(404), body=None),
+            "live/model": "still here",
+        },
+    )
+
+    chunks = [c async for c in adapter.stream(_messages())]
+
+    assert "".join(c.text for c in chunks).strip() == "still here"
+    assert provider.calls == ["retired/model", "live/model"]
+
+
+async def test_all_models_failing_reports_the_last_error() -> None:
+    adapter = _multi("a/one", "b/two", "c/three")
+    provider = _script(
+        adapter,
+        {
+            m: openai.RateLimitError("slow down", response=_response(429), body=None)
+            for m in ("a/one", "b/two", "c/three")
+        },
+    )
+
+    with pytest.raises(RateLimitedError):
+        await _consume(adapter)
+
+    assert provider.calls == ["a/one", "b/two", "c/three"]
+
+
+async def test_invalid_credentials_does_not_try_the_other_models() -> None:
+    """The guard against the fallback degenerating into "retry everything". It
+    is the same key for every model, so the rest can only fail the same way."""
+    adapter = _multi("a/one", "b/two", "c/three")
+    provider = _script(
+        adapter,
+        {"a/one": openai.AuthenticationError("bad key", response=_response(401), body=None)},
+    )
+
+    with pytest.raises(InvalidCredentialsError):
+        await _consume(adapter)
+
+    assert provider.calls == ["a/one"]
+
+
+async def test_no_fallback_once_the_stream_has_started() -> None:
+    """Bytes already on the wire cannot be rewound, so a mid-stream failure is
+    a failed turn rather than a reason to start over on another model."""
+
+    class _FailsMidStream(_FakeStream):
+        async def __aiter__(self) -> Any:
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="par"))])
+            raise openai.RateLimitError("slow down", response=_response(429), body=None)
+
+    adapter = _multi("first/model", "second/model")
+    provider = _ScriptedProvider({})
+
+    async def create(*, model: str, **_kwargs: Any) -> Any:
+        provider.calls.append(model)
+        return _FailsMidStream("")
+
+    adapter._client.chat.completions.create = create  # type: ignore[method-assign]
+
+    with pytest.raises(RateLimitedError):
+        await _consume(adapter)
+
+    assert provider.calls == ["first/model"]

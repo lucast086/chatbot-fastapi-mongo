@@ -112,6 +112,9 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 .message { max-width: 720px; margin: 0 auto 18px; }
 .message .who { display: block; color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+/* Which model answered. Shown so a fallback to another free model is visible
+   rather than a silent change in answer quality. */
+.message .by { font-style: normal; opacity: 0.65; }
 .message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.user p { color: #cdd4e0; }
 .message.pending { color: var(--muted); max-width: 720px; margin: 0 auto; }

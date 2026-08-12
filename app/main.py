@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.llm = OpenRouterLLM(
         api_key=settings.openrouter_api_key.get_secret_value(),
         base_url=settings.openrouter_base_url,
-        model=settings.openrouter_model,
+        models=settings.openrouter_models,
         system_prompt=settings.system_prompt,
         timeout_seconds=settings.request_timeout_seconds,
         max_output_tokens=settings.max_output_tokens,
@@ -57,7 +57,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.title_generator = OpenRouterTitleGenerator(
         api_key=settings.openrouter_api_key.get_secret_value(),
         base_url=settings.openrouter_base_url,
-        model=settings.openrouter_model,
+        # The first model only. A title is a nicety; it does not deserve a
+        # fallback chain, and failing it costs nothing.
+        model=settings.openrouter_models[0],
         timeout_seconds=settings.request_timeout_seconds,
     )
 
@@ -100,7 +102,7 @@ async def read_config(settings: SettingsDep) -> ConfigResponse:
     """
     return ConfigResponse(
         provider_configured=settings.provider_configured,
-        model=settings.openrouter_model,
+        models=settings.openrouter_models,
         streaming_enabled=True,
         docs_url=DOCS_BASE_URL,
     )

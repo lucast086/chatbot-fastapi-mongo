@@ -11,10 +11,10 @@ needed.
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -42,10 +42,25 @@ class Settings(BaseSettings):
     # what the health check and the frontend banner read.
     openrouter_api_key: SecretStr = SecretStr("")
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    # OpenRouter's `:free` models are rotated and retired, so this is a default
-    # to be overridden rather than a constant to be relied on. The README says
-    # where the current list lives.
-    openrouter_model: str = "google/gemma-4-31b-it:free"
+    # A list, tried in order. `:free` models are rate limited *per model*, so a
+    # second one is usually available the moment the first says 429 — and a
+    # model retired out from under this default is skipped rather than fatal,
+    # which is what keeps a hardcoded list from rotting into a broken app.
+    #
+    # Deliberately excludes reasoning models: they put their tokens in
+    # `delta.reasoning` and leave `content` empty, which reads as a failed turn.
+    # NoDecode: pydantic-settings JSON-decodes complex fields straight out of
+    # the environment, before any validator runs, so a comma-separated string
+    # fails to parse before `split_comma_separated` below ever sees it.
+    # Asking a .env file for JSON would be a hostile contract.
+    openrouter_models: Annotated[list[str], NoDecode] = Field(
+        default=[
+            "google/gemma-4-31b-it:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "inclusionai/ling-3.0-tiny:free",
+        ],
+        min_length=1,
+    )
     request_timeout_seconds: float = Field(default=60.0, gt=0)
     # An answer cap. Without one a runaway or reasoning-heavy model can
     # produce until the context window ends, and a single document over
@@ -63,6 +78,13 @@ class Settings(BaseSettings):
     # the truncated first message with a real title. Off-switch provided because
     # it doubles the requests a first turn costs, which matters on a free tier.
     generate_titles: bool = True
+
+    @field_validator("openrouter_models", mode="before")
+    @classmethod
+    def split_comma_separated(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
 
     @property
     def provider_configured(self) -> bool:
