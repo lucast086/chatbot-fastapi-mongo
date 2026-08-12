@@ -9,6 +9,7 @@ is what keeps the error taxonomy in one place instead of spread across the
 service and the router.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 
@@ -47,12 +48,14 @@ class OpenRouterLLM:
         system_prompt: str,
         timeout_seconds: float,
         max_output_tokens: int,
+        first_token_timeout_seconds: float = 20.0,
     ) -> None:
         # Tried in order. `:free` models are rate limited per model, so when the
         # first says 429 the next is usually free to answer immediately.
         self._models = models
         self._system_prompt = system_prompt
         self._max_output_tokens = max_output_tokens
+        self._first_token_timeout = first_token_timeout_seconds
         # The SDK refuses to construct with an empty key. The service checks
         # for a missing key before reaching this adapter, so this placeholder
         # only keeps the object constructible and dependency wiring branch-free.
@@ -145,11 +148,34 @@ class OpenRouterLLM:
                 stream=True,
                 max_tokens=self._max_output_tokens,
             ) as response:
-                async for chunk in response:
+                stream = response.__aiter__()
+                first = True
+                while True:
+                    try:
+                        # Only the wait for the *first* token is bounded
+                        # separately. A model that accepts the request and then
+                        # goes quiet would otherwise hold the UI on "Thinking…"
+                        # for the full request timeout, which reads as a frozen
+                        # app. Nothing has been yielded yet, so abandoning it is
+                        # free and the caller can still try another model.
+                        if first:
+                            chunk = await asyncio.wait_for(
+                                anext(stream), timeout=self._first_token_timeout
+                            )
+                        else:
+                            chunk = await anext(stream)
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as exc:
+                        raise ProviderUnavailableError(
+                            f"{model} produced no output within {self._first_token_timeout:.0f}s"
+                        ) from exc
+
                     if not chunk.choices:
                         continue
                     delta = chunk.choices[0].delta
                     if delta.content:
+                        first = False
                         yield Chunk(text=delta.content, model=model)
                     elif _reasoning_of(delta):
                         # Reasoning models put their tokens in `reasoning` with

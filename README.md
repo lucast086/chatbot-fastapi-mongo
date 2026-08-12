@@ -91,6 +91,7 @@ absence degrades the app rather than stopping it.
 | `OPENROUTER_API_KEY` | *(empty)* | The only one without a usable default |
 | `OPENROUTER_MODELS` | three free models | Comma separated, tried in order. See [rate limits](#troubleshooting-rate-limited) |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint, including a local one |
+| `FIRST_TOKEN_TIMEOUT_SECONDS` | `20` | How long to wait for a model's first token before trying the next |
 | `HISTORY_LIMIT` | `20` | Messages sent as context. A count, not a token budget |
 | `GENERATE_TITLES` | `true` | One extra call after the first turn. `false` halves what a first turn costs |
 | `WEB_PORT` | `8080` | The port you open |

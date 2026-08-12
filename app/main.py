@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         system_prompt=settings.system_prompt,
         timeout_seconds=settings.request_timeout_seconds,
         max_output_tokens=settings.max_output_tokens,
+        first_token_timeout_seconds=settings.first_token_timeout_seconds,
     )
     app.state.title_generator = OpenRouterTitleGenerator(
         api_key=settings.openrouter_api_key.get_secret_value(),

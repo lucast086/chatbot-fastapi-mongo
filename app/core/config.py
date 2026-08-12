@@ -62,6 +62,11 @@ class Settings(BaseSettings):
         min_length=1,
     )
     request_timeout_seconds: float = Field(default=60.0, gt=0)
+    # How long to wait for a model's *first* token before giving up on it.
+    # Much shorter than the overall timeout because nothing has been sent to
+    # the client yet, so abandoning it is free — and a model that has gone
+    # quiet is indistinguishable from a frozen app until this fires.
+    first_token_timeout_seconds: float = Field(default=20.0, gt=0)
     # An answer cap. Without one a runaway or reasoning-heavy model can
     # produce until the context window ends, and a single document over
     # MongoDB's 16MB limit would fail the write for the whole turn.

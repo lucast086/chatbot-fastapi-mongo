@@ -9,6 +9,7 @@ The one test that does talk to the real provider is marked `live` and skipped
 unless a key is present.
 """
 
+import asyncio
 import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -379,3 +380,36 @@ async def test_no_fallback_once_the_stream_has_started() -> None:
         await _consume(adapter)
 
     assert provider.calls == ["first/model"]
+
+
+async def test_a_model_that_goes_quiet_is_abandoned_and_the_next_is_tried() -> None:
+    """A model that accepts the request and then produces nothing would hold the
+    UI on "Thinking…" for the whole request timeout, which reads as a frozen
+    app. Nothing has been yielded yet, so abandoning it is free."""
+
+    class _NeverYields(_FakeStream):
+        async def __aiter__(self) -> Any:
+            await asyncio.sleep(10)
+            yield SimpleNamespace(choices=[])
+
+    adapter = OpenRouterLLM(
+        api_key="sk-test",
+        base_url="https://openrouter.ai/api/v1",
+        models=["silent/model", "talkative/model"],
+        system_prompt="You are helpful.",
+        timeout_seconds=60.0,
+        max_output_tokens=256,
+        first_token_timeout_seconds=0.05,
+    )
+    calls: list[str] = []
+
+    async def create(*, model: str, **_kwargs: Any) -> Any:
+        calls.append(model)
+        return _NeverYields("") if model == "silent/model" else _FakeStream("here I am")
+
+    adapter._client.chat.completions.create = create  # type: ignore[method-assign]
+
+    chunks = [c async for c in adapter.stream(_messages())]
+
+    assert "".join(c.text for c in chunks).strip() == "here I am"
+    assert calls == ["silent/model", "talkative/model"]

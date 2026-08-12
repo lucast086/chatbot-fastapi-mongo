@@ -3,11 +3,14 @@
  * enough to try the chat, and splitting ~250 lines across a component tree
  * would be structure without a reader to serve.
  *
- * Two behaviours here are not cosmetic:
+ * Three behaviours here are not cosmetic:
  *  - the provider banner is shown from /config on load, not after a failed
  *    message, so someone who forgot the API key learns it immediately;
- *  - a failed send keeps the text in the composer, because the backend stored
- *    nothing and re-sending is the retry.
+ *  - a failed send puts the text back in the composer, because the backend
+ *    stored nothing and re-sending is the retry;
+ *  - every async update is guarded on the conversation still being open.
+ *    Switching conversations mid-turn used to paint the answer, and the
+ *    leftover draft, into whichever thread happened to be on screen.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -29,6 +32,10 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<ChatApiError | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  // Mirrors activeId for async callbacks. State read inside a promise that
+  // started earlier is the value from that render, which is exactly the stale
+  // read these guards exist to avoid.
+  const activeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     api.getConfig().then(setConfig).catch(() => undefined);
@@ -50,7 +57,16 @@ export default function App() {
   async function openConversation(id: string) {
     setActiveId(id);
     setError(null);
+    setMessages([]);
+    // A draft belongs to the conversation it was typed in. Carrying it over
+    // means the next thing you send lands somewhere you did not write it.
+    setDraft("");
+    activeIdRef.current = id;
+
     const detail = await api.getConversation(id);
+    // Two quick clicks race: whichever fetch resolves last would otherwise win
+    // and paint its messages under a sidebar that says something else.
+    if (activeIdRef.current !== id) return;
     setMessages(detail.messages);
   }
 
@@ -58,7 +74,9 @@ export default function App() {
     const created = await api.createConversation();
     setConversations((current) => [created, ...current]);
     setActiveId(created.id);
+    activeIdRef.current = created.id;
     setMessages([]);
+    setDraft("");
     setError(null);
   }
 
@@ -68,7 +86,9 @@ export default function App() {
     setConversations((current) => current.filter((c) => c.id !== id));
     if (activeId === id) {
       setActiveId(null);
+      activeIdRef.current = null;
       setMessages([]);
+      setDraft("");
     }
   }
 
@@ -83,23 +103,28 @@ export default function App() {
       setConversations((current) => [created, ...current]);
       conversationId = created.id;
       setActiveId(created.id);
+      activeIdRef.current = created.id;
     }
 
     setSending(true);
     setError(null);
+    // Cleared immediately: the message is already rendered in the thread, so
+    // leaving it in the composer shows it twice. It comes back on failure,
+    // which keeps "the text in the box is the retry" true where it matters.
+    setDraft("");
     try {
       if (config?.streaming_enabled) {
         await sendStreaming(conversationId, content);
       } else {
         const result = await api.sendMessage(conversationId, content);
-        setMessages((current) => [...current, result.user_message, result.assistant_message]);
+        if (activeIdRef.current === conversationId) {
+          setMessages((current) => [...current, result.user_message, result.assistant_message]);
+        }
       }
-      // Cleared only after the turn succeeded. The backend persisted nothing on
-      // failure, so the text still in the box is the retry.
-      setDraft("");
       await refreshConversations();
     } catch (caught) {
       setError(caught as ChatApiError);
+      if (activeIdRef.current === conversationId) setDraft(content);
     } finally {
       setSending(false);
     }
@@ -113,6 +138,13 @@ export default function App() {
       created_at: new Date().toISOString(),
     };
     const pendingId = `local-${Date.now()}-a`;
+
+    // Every update below is guarded on the conversation still being open.
+    // Without this, a turn started in one conversation keeps writing into
+    // whatever thread the user switched to — the answer to a question they
+    // asked somewhere else appears under an unrelated one.
+    const stillHere = () => activeIdRef.current === conversationId;
+
     setMessages((current) => [
       ...current,
       userMessage,
@@ -121,16 +153,18 @@ export default function App() {
 
     let failure: ChatApiError | null = null;
     await streamMessage(conversationId, content, {
-      onChunk: (text) =>
+      onChunk: (text) => {
+        if (!stillHere()) return;
         setMessages((current) =>
           current.map((m) => (m.id === pendingId ? { ...m, content: m.content + text } : m)),
-        ),
-      onDone: ({ model }) =>
+        );
+      },
+      onDone: ({ model }) => {
+        if (!stillHere()) return;
         // The answering model is only known when the stream closes, since the
         // backend may have fallen through to a later one.
-        setMessages((current) =>
-          current.map((m) => (m.id === pendingId ? { ...m, model } : m)),
-        ),
+        setMessages((current) => current.map((m) => (m.id === pendingId ? { ...m, model } : m)));
+      },
       onError: (caught) => {
         failure = caught;
       },
@@ -139,7 +173,11 @@ export default function App() {
     if (failure) {
       // The backend stored nothing, so the optimistic pair has to come back out
       // rather than sit there looking persisted.
-      setMessages((current) => current.filter((m) => m.id !== pendingId && m.id !== userMessage.id));
+      if (stillHere()) {
+        setMessages((current) =>
+          current.filter((m) => m.id !== pendingId && m.id !== userMessage.id),
+        );
+      }
       throw failure;
     }
   }
@@ -193,19 +231,17 @@ export default function App() {
         )}
 
         <div className="thread" ref={threadRef}>
-          {messages.length === 0 && !sending && (
-            <p className="empty">Send a message to start.</p>
-          )}
+          {messages.length === 0 && <p className="empty">Send a message to start.</p>}
           {messages.map((message) => (
             <article key={message.id} className={`message ${message.role}`}>
               <span className="who">
                 {message.role === "user" ? "You" : "Assistant"}
                 {message.model && <em className="by"> · {message.model}</em>}
               </span>
-              <p>{message.content}</p>
+              <p>{message.content || (message.role === "assistant" ? "Thinking…" : "")}</p>
             </article>
           ))}
-          {sending && <article className="message assistant pending">Thinking…</article>}
+
         </div>
 
         {error && (
