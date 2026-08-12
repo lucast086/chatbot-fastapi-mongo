@@ -13,6 +13,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.adapters.mongo.connection import create_client, ensure_indexes
+from app.api.errors import DOCS_BASE_URL, register_exception_handlers
+from app.api.routers.conversations import router as conversations_router
+from app.api.schemas import ConfigResponse
 from app.core.config import get_settings
 from app.core.dependencies import DbDep, SettingsDep
 
@@ -56,6 +59,26 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+register_exception_handlers(app)
+app.include_router(conversations_router, prefix="/api/v1")
+
+
+@app.get("/api/v1/config", tags=["config"])
+async def read_config(settings: SettingsDep) -> ConfigResponse:
+    """What the frontend needs on load.
+
+    Separate from the health endpoints on purpose: health is a contract for an
+    orchestrator and should be free to change shape, this is a contract for the
+    UI. The model name and a documentation link have no business in a health
+    probe.
+    """
+    return ConfigResponse(
+        provider_configured=settings.provider_configured,
+        model=settings.openrouter_model,
+        streaming_enabled=False,
+        docs_url=DOCS_BASE_URL,
+    )
 
 
 @app.get("/health/live", tags=["health"])

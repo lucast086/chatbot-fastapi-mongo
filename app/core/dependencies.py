@@ -13,6 +13,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from app.adapters.mongo.conversation_store import MongoConversationStore
 from app.core.config import Settings, get_settings
 from app.domain.ports import ConversationStorePort
+from app.services.conversation_service import ConversationService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -32,3 +33,10 @@ def get_conversation_store(db: DbDep) -> ConversationStorePort:
 
 
 ConversationStoreDep = Annotated[ConversationStorePort, Depends(get_conversation_store)]
+
+
+def get_conversation_service(store: ConversationStoreDep) -> ConversationService:
+    return ConversationService(store)
+
+
+ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
