@@ -173,6 +173,15 @@ traceback, which is deliberately not sent in the response.
 
 ### Other problems
 
+**I set the key but the banner still says no key.** Almost always this:
+`docker compose restart` does **not** re-read `.env`. Restarting reuses the
+container with the environment it was created with. Use `docker compose up -d`
+instead — it notices the configuration changed and recreates the container.
+
+```bash
+docker compose exec api sh -c 'echo $OPENROUTER_API_KEY'   # what it actually has
+```
+
 **Port already in use.** Set `WEB_PORT`, `API_PORT` or `MONGO_PORT` in `.env`.
 
 **The page loads but nothing works.** Check `curl

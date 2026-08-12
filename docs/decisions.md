@@ -303,6 +303,34 @@ development experience would matter more than the reviewer's first run.
 
 ---
 
+## The domain uses dataclasses; Pydantic stops at the API boundary
+
+**Context.** Pydantic is already a dependency and FastAPI speaks it natively, so
+the path of least resistance is one Pydantic model per concept, used from the
+HTTP layer all the way down.
+
+**Decision.** `app/domain/models.py` is frozen dataclasses. Pydantic models live
+in `app/api/schemas.py` and nowhere else, with explicit `from_domain`
+converters between them.
+
+**Why.** They answer to different masters. A Pydantic schema changes when the
+wire format changes — a field renamed for the frontend, a value formatted for
+display — and none of that should be able to reach into business logic. Sharing
+one class means every API-shaped change is also a domain change, and the
+compiler cannot tell you which was intended. Frozen dataclasses also make domain
+objects immutable by default, which removes a class of bug where a service
+mutates an entity another part of the flow still holds.
+
+**The cost, honestly:** the converters are boilerplate, and at this size a
+reviewer could reasonably call them ceremony. The line is worth holding because
+this is exactly the boundary that erodes first.
+
+**When this would NOT apply.** In a CRUD service where the API shape *is* the
+domain shape, two parallel class hierarchies are duplication with extra steps,
+and one Pydantic model is the honest answer.
+
+---
+
 ## `uv` for the Python toolchain
 
 **Context.** The project targets Python 3.13. Getting that interpreter plus a
