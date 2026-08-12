@@ -112,7 +112,7 @@ class ModelUnavailableError(ProviderError):
     def __init__(self, model: str, detail: str | None = None) -> None:
         message = (
             f"The configured model '{model}' is not available. Free models are "
-            "rotated and retired regularly — set OPENROUTER_MODEL to a current "
+            "rotated and retired regularly — set OPENROUTER_MODELS to current "
             "one from https://openrouter.ai/models?q=free"
         )
         if detail:

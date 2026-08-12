@@ -1,7 +1,7 @@
 # Conversation flow — Spec
 
 **Location**: `app/services/chat_service.py`
-**Status**: `in-progress`
+**Status**: `stable`
 **Last updated**: 2026-08-12
 
 Written before the code that implements it. This describes WHAT the conversation
@@ -148,10 +148,10 @@ obvious blast radius in the suite.
 | 21 | Every model failing reports the last failure, having tried them all | `test_all_models_failing_reports_the_last_error` |
 | 22 | A rejected key is reported after one attempt, not one per model | `test_invalid_credentials_does_not_try_the_other_models` |
 | 23 | No fallback once chunks have started arriving | `test_no_fallback_once_the_stream_has_started` |
-| 24 | The stored answer records the model that produced it, not the first configured | `test_the_answer_records_the_model_that_produced_it` |
+| 24 | The stored answer records the model that produced it, not the first configured | `test_a_stored_answer_reports_which_model_produced_it` |
 | 16 | A generated title never costs a turn | `test_a_failed_title_leaves_the_derived_one_in_place`, `test_titles_are_only_generated_for_the_first_turn` |
 | 17 | A streamed turn is persisted only when the stream completes | `test_a_streamed_turn_is_persisted_when_the_stream_completes`, `test_a_failure_during_generation_persists_nothing` |
-| 18 | A pre-flight failure on the stream route keeps a real status code | `test_a_failure_before_the_stream_opens_is_a_real_status_code`, `test_an_invalid_message_is_a_real_status_code` |
+| 18 | A pre-flight failure on the stream route keeps a real status code | `test_a_missing_api_key_is_a_real_503_not_an_in_band_event`, `test_an_unknown_conversation_is_a_real_404`, `test_an_invalid_message_is_a_real_status_code` |
 
 **Result: 24 of 24 mapped.** Criteria 3, 7, 8 and 9 are covered twice on
 purpose — once against a fake store and once against a real MongoDB, because a

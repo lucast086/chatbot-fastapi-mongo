@@ -234,6 +234,59 @@ attacker, a deliberately vague error would be the right call.
 
 ---
 
+## Several models, tried in order, rather than asking the user to retry
+
+**Context.** OpenRouter rate limits `:free` models *per model*, not per account.
+This was not theoretical: a 429 turned up repeatedly during development,
+including in the final end-to-end check. Someone opening the app and sending
+three messages will meet one.
+
+The existing handling was already correct — a typed error, `retryable: true`,
+`Retry-After` passed through, a retry button, and a README section saying the
+cause is the provider's. But correct is not the same as good: it hands the work
+to the user.
+
+**Decision.** `OPENROUTER_MODELS` is a list tried in order. A failure another
+model might not share moves to the next one. Every answer records and displays
+which model produced it. If none answer, the existing taxonomy fires unchanged.
+
+**Why.** The brief does not ask the user to choose a model. It asks for a
+chatbot that answers, and "does it work" is the axis it says matters most. This
+is an interpretation, not a requirement, and it is mine to defend.
+
+Falling back is deliberately *not* retrying. `invalid_credentials` does not move
+on: it is the same API key for every model, so the rest can only fail the same
+way. That is the same principle the whole error taxonomy rests on, applied one
+level up — and there is a test asserting exactly one attempt, so this cannot
+quietly decay into "retry everything".
+
+Treating a retired model as a reason to move on has a second effect worth
+naming: it is what stops a hardcoded list from rotting. Free model names rotate,
+and a list written today will contain a dead entry within weeks. Skipping it
+degrades the list instead of breaking the app.
+
+**The cost, accepted.** Answer quality varies between models, and a fallback
+means the user may get a different quality than the one configured. That is why
+every message displays the model that produced it — the degradation is visible
+rather than silent. Without that display this decision would be hiding
+something, and I would not have made it.
+
+A second cost: no fallback once the answer has started arriving, because bytes
+on the wire cannot be rewound. A mid-stream failure stays a failed turn.
+
+**When this would NOT apply.** On a paid tier with one deliberately chosen
+model, silently substituting another would be wrong — the caller picked that
+model for a reason, and a rate limit is information they need rather than a
+problem to route around.
+
+**What production would do instead.** Fetch the live list from
+`/api/v1/models` on a schedule and keep the candidates current, rather than
+hardcoding them. That is the right answer and it is out of scope here; the
+hardcoded list plus skip-on-retired gets most of the benefit for none of the
+machinery.
+
+---
+
 ## A retired model is its own error, separate from an outage
 
 **Context.** The taxonomy started with four provider outcomes. The first time

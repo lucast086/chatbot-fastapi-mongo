@@ -66,6 +66,8 @@ docker compose up -d`, reload the page. The conversation is still there.
 - Multiple conversations: create, list, open, delete
 - Answers with conversation history as context, bounded by a configurable window
 - Conversations are named from the first message, then renamed by the model
+- Several free models tried in order, so a rate limit on one does not stop you
+  — every answer says which model produced it
 - Answers stream token by token over server-sent events
 - Typed provider errors with a single response envelope and a retry hint
 - Runs and stays usable with no API key configured
@@ -87,7 +89,7 @@ absence degrades the app rather than stopping it.
 | Variable | Default | What it does |
 |---|---|---|
 | `OPENROUTER_API_KEY` | *(empty)* | The only one without a usable default |
-| `OPENROUTER_MODEL` | `google/gemma-4-31b-it:free` | Free models rotate — see [`model_unavailable`](#troubleshooting-model-unavailable) |
+| `OPENROUTER_MODELS` | three free models | Comma separated, tried in order. See [rate limits](#troubleshooting-rate-limited) |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint, including a local one |
 | `HISTORY_LIMIT` | `20` | Messages sent as context. A count, not a token budget |
 | `GENERATE_TITLES` | `true` | One extra call after the first turn. `false` halves what a first turn costs |
@@ -96,7 +98,7 @@ absence degrades the app rather than stopping it.
 | `MONGO_PORT` | `27017` | Published for `mongosh`; not needed either |
 
 Using a different provider only needs `OPENROUTER_BASE_URL` and
-`OPENROUTER_MODEL` — the adapter talks the OpenAI wire format, so a local
+`OPENROUTER_MODELS` — the adapter talks the OpenAI wire format, so a local
 Ollama or LM Studio works without a code change.
 
 ---
@@ -131,24 +133,26 @@ configuration.
 
 ### troubleshooting-rate-limited
 
-**429**, with `Retry-After` when the provider sends one. Free-tier models are
-rate limited per model, so this is normal rather than exceptional — expect it if
-you send several messages quickly.
+**429**, and you should rarely see it. Free models are rate limited *per
+model*, so when one refuses, the next in `OPENROUTER_MODELS` is tried
+automatically — that is what the model name under each answer is telling you.
 
-Wait and retry, or switch `OPENROUTER_MODEL` to another free model: the limit
-applies per model, so a different one is usually available immediately.
+This error only appears when **every** configured model is limited at once. Wait
+for the suggested time, or add another model from
+<https://openrouter.ai/models?q=free> to the list.
 
 Nothing was saved. Your message is still in the composer, and sending it again
 is the retry.
 
 ### troubleshooting-model-unavailable
 
-**502.** The configured model does not exist or has stopped being free.
-OpenRouter rotates and retires its `:free` models regularly, so this is the most
-likely failure if you run this repository some time after it was written.
+**502.** Every configured model is gone or no longer free. A single retired
+model is skipped automatically and the next one is tried, so this means the
+whole list has aged out — likely if you run this repository long after it was
+written.
 
-Pick a current one from <https://openrouter.ai/models?q=free> and set
-`OPENROUTER_MODEL`. The error message includes the provider's own suggestion
+Pick current ones from <https://openrouter.ai/models?q=free> and set
+`OPENROUTER_MODELS`. The error message includes the provider's own suggestion
 when it offers one.
 
 ### troubleshooting-provider-unavailable
@@ -268,6 +272,9 @@ retired — four categories looked complete until something real disagreed.
   populates, which is what was there before and got removed.
 - Serialised writes per conversation. Two turns sent at once interleave; see
   `docs/plan.md` ambiguity 5 for exactly what competes.
+- Refreshing the model list from OpenRouter's `/api/v1/models` on a schedule
+  instead of hardcoding it. The hardcoded list skips retired models rather
+  than breaking, which gets most of the benefit — but it still ages.
 - Cursor pagination on the message list. Loading an entire conversation is fine
   at this size and will not stay fine.
 - A frontend test suite. There is none: the backend is what the brief says it
