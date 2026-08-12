@@ -11,7 +11,12 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from app.domain.errors import NotFoundError, ProviderUnavailableError, ValidationError
+from app.domain.errors import (
+    MissingApiKeyError,
+    NotFoundError,
+    ProviderUnavailableError,
+    ValidationError,
+)
 from app.domain.models import Conversation, Message, MessageRole
 from app.domain.ports import ConversationStorePort, LLMPort, TitleGeneratorPort
 from app.services.conversation_service import DEFAULT_TITLE, derive_title
@@ -25,9 +30,13 @@ class ChatService:
         history_limit: int,
         max_message_length: int,
         titles: TitleGeneratorPort | None = None,
+        provider_configured: bool = True,
     ) -> None:
         self._store = store
         self._llm = llm
+        # Known before any I/O, so the streaming route can report it as a real
+        # status code. The adapter keeps its own guard as defence in depth.
+        self._provider_configured = provider_configured
         self._history_limit = history_limit
         self._max_message_length = max_message_length
         # Optional: without it, conversations keep the title derived from their
@@ -48,6 +57,11 @@ class ChatService:
         status code is still possible — once a stream opens, the status line has
         already been sent.
         """
+        # First, because it needs no I/O and because the streaming route can
+        # only return a status code for what is known before the stream opens.
+        if not self._provider_configured:
+            raise MissingApiKeyError()
+
         text = self._validate(content)
 
         conversation = await self._store.get_conversation(conversation_id)

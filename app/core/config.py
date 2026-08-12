@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # where the current list lives.
     openrouter_model: str = "google/gemma-4-31b-it:free"
     request_timeout_seconds: float = Field(default=60.0, gt=0)
+    # An answer cap. Without one a runaway or reasoning-heavy model can
+    # produce until the context window ends, and a single document over
+    # MongoDB's 16MB limit would fail the write for the whole turn.
+    max_output_tokens: int = Field(default=2048, gt=0)
 
     # --- Conversation behaviour --------------------------------------------
     system_prompt: str = "You are a helpful assistant. Answer clearly and concisely."

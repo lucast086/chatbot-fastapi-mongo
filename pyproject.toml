@@ -133,3 +133,13 @@ name = "domain is pure: it depends on nothing else in the project"
 type = "forbidden"
 source_modules = ["app.domain"]
 forbidden_modules = ["app.adapters", "app.services", "app.api", "app.core"]
+
+# The outermost ring. Without this the three contracts above leave the adapter
+# layer completely unconstrained: an adapter importing app.api.errors — the
+# textbook ports-and-adapters violation — passed all of them. Verified by
+# introducing exactly that import and watching CI stay green.
+[[tool.importlinter.contracts]]
+name = "adapters know only the domain"
+type = "forbidden"
+source_modules = ["app.adapters"]
+forbidden_modules = ["app.api", "app.services", "app.core"]

@@ -14,6 +14,7 @@ fields so the frontend handles both paths with one piece of code.
 """
 
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
@@ -22,6 +23,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.api.errors import error_body, error_response, status_for
 from app.core.dependencies import ChatServiceDep
 from app.domain.errors import DomainError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -69,6 +72,18 @@ async def stream_message(
             # The status line is long gone, so the error travels in-band with
             # the same shape the JSON route would have returned.
             yield _event("error", error_body(exc.reason, str(exc), exc.retryable))
+            return
+        except Exception:
+            # finish_turn writes to the database, and a driver error is not a
+            # DomainError. Without this the generator just stops: no error
+            # event, no done event, the connection dies mid-stream, and the
+            # client is left showing an answer that was never stored. A silent
+            # data-loss event is worse than a loud one.
+            logger.exception("Unhandled error while streaming a turn")
+            yield _event(
+                "error",
+                error_body("internal_error", "Something went wrong on our side.", False),
+            )
             return
         yield _event(
             "done",

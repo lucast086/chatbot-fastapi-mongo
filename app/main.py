@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.adapters.mongo.connection import create_client, ensure_indexes
+from app.adapters.openrouter.llm import OpenRouterLLM, OpenRouterTitleGenerator
 from app.api.errors import DOCS_BASE_URL, register_exception_handlers
 from app.api.routers.conversations import router as conversations_router
 from app.api.routers.streaming import router as streaming_router
@@ -40,6 +41,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("Could not create indexes at startup; MongoDB is unreachable.")
 
+    # Built once, like the Mongo client and for the same reason: each
+    # AsyncOpenAI owns an httpx connection pool, so constructing them per
+    # request meant a fresh TLS handshake on every turn — added straight to
+    # time-to-first-token on a streaming product — and pools that were never
+    # closed, accumulating sockets under load.
+    app.state.llm = OpenRouterLLM(
+        api_key=settings.openrouter_api_key.get_secret_value(),
+        base_url=settings.openrouter_base_url,
+        model=settings.openrouter_model,
+        system_prompt=settings.system_prompt,
+        timeout_seconds=settings.request_timeout_seconds,
+        max_output_tokens=settings.max_output_tokens,
+    )
+    app.state.title_generator = OpenRouterTitleGenerator(
+        api_key=settings.openrouter_api_key.get_secret_value(),
+        base_url=settings.openrouter_base_url,
+        model=settings.openrouter_model,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+
     # Detected here rather than when someone sends their first message, so the
     # UI can show the banner as soon as the page opens.
     if not settings.provider_configured:
@@ -52,6 +73,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await app.state.llm.aclose()
+        await app.state.title_generator.aclose()
         await client.close()
 
 

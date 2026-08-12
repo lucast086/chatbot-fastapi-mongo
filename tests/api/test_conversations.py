@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_conversation_service
+from app.domain.models import Conversation
 from app.main import app
 from app.services.conversation_service import ConversationService
 from tests.fakes import FakeConversationStore
@@ -100,3 +101,38 @@ def test_a_too_long_title_is_rejected_with_the_error_envelope(client: TestClient
     body = response.json()
     assert body["reason"] == "validation_error"
     assert "title" in body["message"]
+
+
+def test_an_unexpected_exception_still_uses_the_error_envelope(
+    store: FakeConversationStore,
+) -> None:
+    """The one error class nobody anticipated is the one most likely to break
+    the envelope: without a catch-all handler, Starlette answers plain-text
+    `Internal Server Error` and every promise the API makes about error shape
+    stops being true exactly when it matters."""
+
+    class ExplodingStore(FakeConversationStore):
+        async def list_conversations(self, limit: int) -> list[Conversation]:
+            raise RuntimeError("the database went away")
+
+    app.dependency_overrides[get_conversation_service] = lambda: ConversationService(
+        ExplodingStore()
+    )
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/v1/conversations")
+
+    assert response.status_code == 500
+    assert response.headers["content-type"].startswith("application/json")
+    assert set(response.json()) == {"reason", "message", "retryable", "docs_url"}
+    assert response.json()["reason"] == "internal_error"
+
+
+def test_the_wrong_verb_is_a_client_error_not_an_internal_one(client: TestClient) -> None:
+    # A 405 used to be reported as `internal_error`, sending the caller to a
+    # README section that says "this is a bug rather than a configuration
+    # problem" for what is plainly their own mistake.
+    response = client.put("/api/v1/conversations")
+
+    assert response.status_code == 405
+    assert response.json()["reason"] == "client_error"
+    assert "Allow" in response.headers

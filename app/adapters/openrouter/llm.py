@@ -36,13 +36,15 @@ class OpenRouterLLM:
         model: str,
         system_prompt: str,
         timeout_seconds: float,
+        max_output_tokens: int,
     ) -> None:
         self._model = model
         self._system_prompt = system_prompt
-        # The SDK refuses to construct with an empty key, and there is nothing
-        # to construct it for: the service checks `MissingApiKeyError` before
-        # reaching this adapter. The placeholder keeps the object creatable so
-        # dependency wiring does not have to branch.
+        self._max_output_tokens = max_output_tokens
+        # The SDK refuses to construct with an empty key. The service checks
+        # for a missing key before reaching this adapter, so this placeholder
+        # only keeps the object constructible and dependency wiring branch-free.
+        # The guard in `stream` below stays as defence in depth.
         self._client = AsyncOpenAI(
             api_key=api_key or "not-configured",
             base_url=base_url,
@@ -51,9 +53,14 @@ class OpenRouterLLM:
         )
         self._configured = bool(api_key)
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
         if not self._configured:
             raise MissingApiKeyError()
+
+        saw_reasoning_only = False
 
         # Built role by role rather than from `m.role.value`, which is a plain
         # str: the SDK types each role as a Literal. Suppressing that mismatch
@@ -70,17 +77,38 @@ class OpenRouterLLM:
                 payload.append({"role": "assistant", "content": message.content})
 
         try:
-            response = await self._client.chat.completions.create(
+            # `async with`: when a client disconnects mid-generation, the outer
+            # generator is closed at its yield and this iterator is left
+            # suspended. Python does not close an async iterator on loop exit,
+            # so without this the provider response waits for garbage
+            # collection to be finalised.
+            async with await self._client.chat.completions.create(
                 model=self._model,
                 messages=payload,
                 stream=True,
-            )
-            async for chunk in response:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    yield delta.content
+                max_tokens=self._max_output_tokens,
+            ) as response:
+                async for chunk in response:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        yield delta.content
+                    elif _reasoning_of(delta):
+                        # Reasoning models put their tokens in `reasoning` with
+                        # `content` null for long stretches. Yielding nothing
+                        # would make finish_turn see an empty answer and report
+                        # a retryable provider outage — telling the caller to
+                        # retry a permanent, configuration-caused condition,
+                        # which is the exact mistake ModelUnavailableError
+                        # exists to avoid making twice.
+                        saw_reasoning_only = True
+            if saw_reasoning_only:
+                logger.warning(
+                    "Model %s emitted only reasoning tokens and no answer. "
+                    "Reasoning models are not supported; pick another model.",
+                    self._model,
+                )
         except openai.AuthenticationError as exc:
             raise InvalidCredentialsError() from exc
         except openai.PermissionDeniedError as exc:
@@ -100,6 +128,12 @@ class OpenRouterLLM:
             if exc.status_code == 404:
                 raise ModelUnavailableError(self._model, _provider_detail(exc)) from exc
             raise ProviderUnavailableError(f"the provider returned {exc.status_code}") from exc
+
+
+def _reasoning_of(delta: object) -> str | None:
+    """Reasoning tokens, under either of the two names providers use."""
+    value = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+    return value if isinstance(value, str) else None
 
 
 def _retry_after_from(exc: openai.RateLimitError) -> int | None:
@@ -162,6 +196,9 @@ class OpenRouterTitleGenerator:
             timeout=min(timeout_seconds, 15.0),
             max_retries=0,
         )
+
+    async def aclose(self) -> None:
+        await self._client.close()
 
     async def suggest_title(self, question: str, answer: str) -> str | None:
         if not self._configured:

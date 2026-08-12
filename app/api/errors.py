@@ -10,6 +10,7 @@ lives in the document a reader already has open rather than in a separate page
 nobody finds.
 """
 
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -18,6 +19,8 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.domain.errors import DomainError, ProviderError
+
+logger = logging.getLogger(__name__)
 
 DOCS_BASE_URL = "https://github.com/lucast086/chatbot-fastapi-mongo#troubleshooting"
 
@@ -33,6 +36,7 @@ _STATUS_BY_REASON = {
     "model_unavailable": 502,
     "rate_limited": 429,
     "provider_unavailable": 504,
+    "client_error": 400,
     "internal_error": 500,
 }
 
@@ -98,12 +102,39 @@ def register_exception_handlers(app: FastAPI) -> None:
         # Mostly 404s for unknown routes and 405s for the wrong verb. Without
         # this, those two would be the only responses in the API with a
         # different shape.
-        reason = "not_found" if exc.status_code == 404 else "internal_error"
+        #
+        # A 405 used to be labelled `internal_error`, which pointed the caller
+        # at a README section saying "this is a bug rather than a configuration
+        # problem" for what is plainly a client mistake.
+        if exc.status_code == 404:
+            reason = "not_found"
+        elif exc.status_code < 500:
+            reason = "client_error"
+        else:
+            reason = "internal_error"
         return error_response(
             reason=reason,
             message=str(exc.detail),
             retryable=False,
             status_code=exc.status_code,
+            # Starlette generates an `Allow` header for a 405; dropping it
+            # breaks HTTP conformance for no reason.
+            headers=dict(exc.headers) if exc.headers else None,
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected(_request: Request, exc: Exception) -> JSONResponse:
+        # Without this, anything that is not a DomainError escapes to
+        # Starlette's ServerErrorMiddleware and comes back as plain-text
+        # "Internal Server Error" — so the one error class nobody anticipated
+        # is the one that breaks the envelope the whole API promises. A
+        # database going away mid-request is the likely case.
+        logger.exception("Unhandled error while serving a request")
+        return error_response(
+            reason="internal_error",
+            message="Something went wrong on our side.",
+            retryable=False,
+            status_code=500,
         )
 
 

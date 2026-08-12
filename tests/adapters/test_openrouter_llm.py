@@ -47,6 +47,7 @@ def _adapter(api_key: str = "sk-test") -> OpenRouterLLM:
         model="test/model",
         system_prompt="You are helpful.",
         timeout_seconds=5.0,
+        max_output_tokens=256,
     )
 
 
@@ -206,6 +207,7 @@ async def test_live_the_configured_model_actually_answers() -> None:
         model=os.getenv("OPENROUTER_MODEL", "google/gemma-4-31b-it:free"),
         system_prompt="Answer with a single word.",
         timeout_seconds=60.0,
+        max_output_tokens=64,
     )
 
     answer = "".join(

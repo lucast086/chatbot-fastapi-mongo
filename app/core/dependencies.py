@@ -11,7 +11,6 @@ from fastapi import Depends, Request
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.adapters.mongo.conversation_store import MongoConversationStore
-from app.adapters.openrouter.llm import OpenRouterLLM, OpenRouterTitleGenerator
 from app.core.config import Settings, get_settings
 from app.domain.ports import ConversationStorePort, LLMPort, TitleGeneratorPort
 from app.services.chat_service import ChatService
@@ -44,29 +43,23 @@ def get_conversation_service(store: ConversationStoreDep) -> ConversationService
 ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
 
 
-def get_llm(settings: SettingsDep) -> LLMPort:
+def get_llm(request: Request) -> LLMPort:
+    # Built once in the lifespan, not per request — same reasoning as the Mongo
+    # client above: an HTTP connection pool is meant to be shared.
+    #
     # There is no fake branch here. In a chatbot the generation is the product,
     # so a runtime fake would make the app look like it works while hiding
     # whether the real integration does. The double lives in tests only.
-    return OpenRouterLLM(
-        api_key=settings.openrouter_api_key.get_secret_value(),
-        base_url=settings.openrouter_base_url,
-        model=settings.openrouter_model,
-        system_prompt=settings.system_prompt,
-        timeout_seconds=settings.request_timeout_seconds,
-    )
+    llm: LLMPort = request.app.state.llm
+    return llm
 
 
 LLMDep = Annotated[LLMPort, Depends(get_llm)]
 
 
-def get_title_generator(settings: SettingsDep) -> TitleGeneratorPort:
-    return OpenRouterTitleGenerator(
-        api_key=settings.openrouter_api_key.get_secret_value(),
-        base_url=settings.openrouter_base_url,
-        model=settings.openrouter_model,
-        timeout_seconds=settings.request_timeout_seconds,
-    )
+def get_title_generator(request: Request) -> TitleGeneratorPort:
+    titles: TitleGeneratorPort = request.app.state.title_generator
+    return titles
 
 
 TitleGeneratorDep = Annotated[TitleGeneratorPort, Depends(get_title_generator)]
@@ -84,6 +77,7 @@ def get_chat_service(
         history_limit=settings.history_limit,
         max_message_length=settings.max_message_length,
         titles=titles if settings.generate_titles else None,
+        provider_configured=settings.provider_configured,
     )
 
 
