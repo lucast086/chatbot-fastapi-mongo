@@ -164,3 +164,28 @@ def test_a_store_failure_mid_stream_emits_an_error_event(
     name, data = _events(response.text)[-1]
     assert name == "error"
     assert '"reason": "internal_error"' in data
+
+
+def test_the_error_event_carries_the_retry_hint(store: FakeConversationStore) -> None:
+    """The header cannot be sent once the stream is open, and streaming is the
+    only path the UI uses — so without this the retry hint was missing in
+    exactly the case free-tier rate limits make routine."""
+    with _client(store, FakeLLM(error=RateLimitedError(retry_after=17))) as client:
+        response = client.post("/api/v1/conversations/c1/messages/stream", json={"content": "hi"})
+
+    _, data = _events(response.text)[-1]
+    assert '"retry_after": 17' in data
+
+
+def test_the_streaming_route_enforces_the_same_length_cap(
+    store: FakeConversationStore,
+) -> None:
+    # It used to take dict[str, str], so the cap held only because the service
+    # repeated it and OpenAPI documented an arbitrary string map.
+    with _client(store, FakeLLM()) as client:
+        response = client.post(
+            "/api/v1/conversations/c1/messages/stream", json={"content": "x" * 8001}
+        )
+
+    assert response.status_code == 422
+    assert response.json()["reason"] == "validation_error"

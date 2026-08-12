@@ -46,13 +46,21 @@ def status_for(reason: str) -> int:
     return _STATUS_BY_REASON.get(reason, 500)
 
 
-def error_body(reason: str, message: str, retryable: bool) -> dict[str, Any]:
-    return {
+def error_body(
+    reason: str, message: str, retryable: bool, retry_after: int | None = None
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
         "reason": reason,
         "message": message,
         "retryable": retryable,
         "docs_url": f"{DOCS_BASE_URL}-{reason.replace('_', '-')}",
     }
+    # Only on the streaming path, which cannot send a Retry-After header — the
+    # status line is long gone by the time the error is known. The JSON path
+    # uses the header instead, so this stays absent there.
+    if retry_after is not None:
+        body["retry_after"] = retry_after
+    return body
 
 
 def error_response(

@@ -21,6 +21,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.errors import error_body, error_response, status_for
+from app.api.schemas import SendMessageRequest
 from app.core.dependencies import ChatServiceDep
 from app.domain.errors import DomainError
 
@@ -38,10 +39,14 @@ def _event(name: str, payload: dict[str, object]) -> str:
 @router.post("/{conversation_id}/messages/stream", response_model=None)
 async def stream_message(
     conversation_id: str,
-    body: dict[str, str],
+    body: SendMessageRequest,
     service: ChatServiceDep,
 ) -> StreamingResponse | JSONResponse:
-    content = (body.get("content") or "").strip()
+    # The same schema as the JSON route. It used to take `dict[str, str]`, which
+    # left the two routes with different contracts — the length cap survived only
+    # because the service repeats it, and OpenAPI documented the body as an
+    # arbitrary string map.
+    content = body.content
 
     # Pre-flight. Everything checkable without calling the model is checked
     # here, while a real status code is still possible.
@@ -71,7 +76,8 @@ async def stream_message(
         except DomainError as exc:
             # The status line is long gone, so the error travels in-band with
             # the same shape the JSON route would have returned.
-            yield _event("error", error_body(exc.reason, str(exc), exc.retryable))
+            retry_after = getattr(exc, "retry_after", None)
+            yield _event("error", error_body(exc.reason, str(exc), exc.retryable, retry_after))
             return
         except Exception:
             # finish_turn writes to the database, and a driver error is not a

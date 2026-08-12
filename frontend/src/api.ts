@@ -14,6 +14,8 @@ export interface ApiError {
   message: string;
   retryable: boolean;
   docs_url: string;
+  /** Streaming path only: the header cannot be sent once the stream is open. */
+  retry_after?: number;
 }
 
 export class ChatApiError extends Error {
@@ -155,7 +157,8 @@ export async function streamMessage(
 
       if (name === "chunk") handlers.onChunk(data.content as string);
       else if (name === "done") handlers.onDone({ title: data.title as string });
-      else if (name === "error") handlers.onError(new ChatApiError(data as ApiError, 200, null));
+      else if (name === "error")
+        handlers.onError(new ChatApiError(data as ApiError, 200, data.retry_after ?? null));
     }
   }
 }

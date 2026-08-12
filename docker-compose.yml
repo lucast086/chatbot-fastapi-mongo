@@ -13,8 +13,13 @@ services:
   web:
     build:
       context: ./frontend
+    # Bound to the loopback interface, not 0.0.0.0. Docker publishes ports by
+    # inserting rules into the DOCKER iptables chain, which is traversed before
+    # ufw/firewalld — so a host firewall does not contain a published port, and
+    # `docker compose up` on café or office Wi-Fi would otherwise expose this
+    # stack to everyone on the segment.
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
     depends_on:
       - api
     restart: unless-stopped
@@ -40,7 +45,7 @@ services:
     # are available without going through nginx. Set API_PORT to change it if
     # something else is already on 8000.
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
       mongo:
         # Not a bare `depends_on: [mongo]`. Without `service_healthy`, Compose
@@ -59,8 +64,12 @@ services:
       # A named volume, not a bind mount: conversations have to survive
       # `docker compose down` followed by `up`. `down -v` is what wipes them.
       - mongo-data:/data/db
+    # Loopback only, and this binding is what makes the no-authentication choice
+    # above defensible rather than aspirational. Published at all purely so a
+    # `mongosh` session works from the host; the app reaches it over the compose
+    # network by service name and never needs the published port.
     ports:
-      - "${MONGO_PORT:-27017}:27017"
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 5s

@@ -406,6 +406,14 @@ That is the appearance of security rather than security, and it costs a reviewer
 an extra concept to hold. Saying plainly that this is a local review environment
 is more honest than a password published next to the lock.
 
+**The control that makes this true.** The port is published as
+`127.0.0.1:27017:27017`, not `27017:27017`. That distinction is the whole
+argument: an earlier version of this file bound `0.0.0.0` while this entry
+claimed localhost-only reachability, so the reasoning was sound and the premise
+was false — anyone on the same Wi-Fi segment had unauthenticated read/write.
+Docker inserts its publishing rules into the DOCKER iptables chain, which is
+traversed *before* ufw, so a host firewall would not have saved it either.
+
 **When this would NOT apply.** The moment the port is exposed beyond localhost,
 or the same compose file is used anywhere shared, authentication stops being
 theatre and the credentials have to come from outside the repository.
