@@ -1,7 +1,7 @@
 # Conversation flow — Spec
 
 **Location**: `app/services/chat_service.py`
-**Status**: `stable`
+**Status**: `in-progress`
 **Last updated**: 2026-08-12
 
 Written before the code that implements it. This describes WHAT the conversation
@@ -25,8 +25,13 @@ happens is part of what the flow does.
 ## Behavior
 
 - **Given** a conversation and a non-empty message, **When** the user sends it,
-  **Then** the model answers, and the question and the answer are stored
-  together as one turn and returned to the caller.
+  **Then** a model answers, and the question and the answer are stored together
+  as one turn and returned to the caller, saying which model produced it.
+
+- **Given** the first configured model cannot answer for a reason another model
+  might not share — it is rate limited, retired, or its upstream is down —
+  **When** the user sends a message, **Then** the next configured model is tried,
+  and so on, so the user gets an answer instead of an instruction to retry.
 
 - **Given** a conversation that already has messages, **When** the user sends
   another, **Then** the model receives the most recent messages as context, up
@@ -42,9 +47,9 @@ happens is part of what the flow does.
   message, **Then** nothing at all is persisted — the conversation is left
   exactly as it was, with no unanswered question stored.
 
-- **Given** a provider failure, **When** the caller receives the error, **Then**
-  it names the specific cause, states whether retrying can help, and links to
-  the matching troubleshooting section.
+- **Given** every configured model failed, **When** the caller receives the
+  error, **Then** it names the specific cause of the last attempt, states whether
+  retrying can help, and links to the matching troubleshooting section.
 
 - **Given** no API key is configured, **When** the user sends a message,
   **Then** the failure is reported as a missing key before any network call is
@@ -68,6 +73,15 @@ conversations in the list, the list must not depend on a network call.
 
 **Provider failures are five distinct outcomes, not one.** The backend knows
 which occurred, and only some are worth retrying. See `docs/decisions.md`.
+
+**Falling back between models is not the same as retrying.** A rejected API key
+is the same key for every model, so trying the rest only burns time — the same
+principle the whole taxonomy rests on, applied one level up. Only failures a
+*different model* might not share cause a fallback.
+
+**The fallback does not hide anything.** Every answer records and displays which
+model produced it, so a user sees the degradation rather than silently receiving
+a worse answer than they expected.
 
 ---
 
@@ -98,8 +112,10 @@ which occurred, and only some are worth retrying. See `docs/decisions.md`.
 | Message is empty or only whitespace | Rejected before any model call, as a validation failure |
 | Message exceeds the maximum length | Rejected as a validation failure, naming the limit |
 | Conversation does not exist | Reported as not found; nothing is created implicitly |
-| Provider rate limits us | Reported as retryable, passing the provider's own wait time through when it sent one, and omitting it rather than guessing when it did not |
-| Configured model has been retired | Reported as a configuration problem and explicitly **not** retryable, naming the model |
+| One model is rate limited | The next configured model is tried. Only if every one is limited is it reported as retryable, passing the provider's own wait time through when it sent one, and omitting it rather than guessing when it did not |
+| One configured model has been retired | Skipped, and the next is tried — so a stale list degrades instead of breaking. Reported only if no model answers, as a configuration problem and explicitly **not** retryable |
+| The API key is rejected | Reported immediately. No other model is tried: it is the same key for all of them |
+| A failure occurs after the answer has started arriving | No fallback — bytes are already on the wire and cannot be rewound. Treated as a failed turn, so nothing is persisted |
 | Provider returns an empty answer | Treated as a failed turn — an empty assistant message is stored nowhere |
 | Conversation is longer than the history window | Only the most recent messages are sent; the stored history stays complete |
 
@@ -127,10 +143,16 @@ obvious blast radius in the suite.
 | 13 | An empty or whitespace-only message is rejected before any model call | `test_an_empty_message_is_rejected_before_any_model_call`, `test_an_empty_message_is_rejected_by_the_schema` |
 | 14 | Sending to an unknown conversation is reported as not found | `test_sending_to_an_unknown_conversation_is_not_found`, `test_sending_to_an_unknown_conversation_is_404` |
 | 15 | An empty answer from the provider does not produce a stored turn | `test_an_empty_answer_does_not_produce_a_stored_turn` |
+| 19 | A rate-limited first model falls back to the next, which answers | `test_a_rate_limited_model_falls_back_to_the_next` |
+| 20 | A retired model in the list is skipped rather than fatal | `test_a_retired_model_is_skipped` |
+| 21 | Every model failing reports the last failure, having tried them all | `test_all_models_failing_reports_the_last_error` |
+| 22 | A rejected key is reported after one attempt, not one per model | `test_invalid_credentials_does_not_try_the_other_models` |
+| 23 | No fallback once chunks have started arriving | `test_no_fallback_once_the_stream_has_started` |
+| 24 | The stored answer records the model that produced it, not the first configured | `test_the_answer_records_the_model_that_produced_it` |
 | 16 | A generated title never costs a turn | `test_a_failed_title_leaves_the_derived_one_in_place`, `test_titles_are_only_generated_for_the_first_turn` |
 | 17 | A streamed turn is persisted only when the stream completes | `test_a_streamed_turn_is_persisted_when_the_stream_completes`, `test_a_failure_during_generation_persists_nothing` |
 | 18 | A pre-flight failure on the stream route keeps a real status code | `test_a_failure_before_the_stream_opens_is_a_real_status_code`, `test_an_invalid_message_is_a_real_status_code` |
 
-**Result: 18 of 18 mapped.** Criteria 3, 7, 8 and 9 are covered twice on
+**Result: 24 of 24 mapped.** Criteria 3, 7, 8 and 9 are covered twice on
 purpose — once against a fake store and once against a real MongoDB, because a
 fake can satisfy the service's expectations while the adapter does not.
