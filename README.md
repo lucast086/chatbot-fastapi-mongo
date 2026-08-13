@@ -19,7 +19,10 @@ so it can be resumed later.
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting) — one section per error `reason`
 - [Development](#development) — [architecture](#architecture), [project layout](#project-layout)
-- [Decisions and trade-offs](#decisions-and-trade-offs) — and [with more time](#with-more-time)
+- [Decisions and trade-offs](#decisions-and-trade-offs) — with more time, on the
+  [model side](#with-more-time--the-model-side) and
+  [everything else](#with-more-time--everything-else), and
+  [if it had to run in production](#and-if-it-had-to-run-in-production)
 - [AI usage](#ai-usage)
 - [Documentation](#documentation)
 
@@ -368,22 +371,7 @@ the frontend needs no table of status codes. The fifth,
 live test caught the default model in this repository having already been
 retired — four categories looked complete until something real disagreed.
 
-### With more time
-
-- A token-based history budget instead of a message count. The window is the
-  first thing that breaks on long conversations with a small context model.
-- Token usage and finish-reason accounting. A port typed `AsyncIterator[str]`
-  has nowhere to carry them, so a truncated answer is indistinguishable from a
-  complete one and there is no cost visibility. Fixing it means a terminal
-  metadata frame on the port — the honest change rather than fields nothing
-  populates, which is what was there before and got removed.
-- Serialised writes per conversation. Two turns sent at once interleave; see
-  `docs/plan.md` ambiguity 5 for exactly what competes.
-- Refreshing the model list from OpenRouter's `/api/v1/models` on a schedule
-  instead of hardcoding it. The hardcoded list skips retired models rather
-  than breaking, which gets most of the benefit — but it still ages.
-
-### The LLM-specific work, with how I would do it
+### With more time — the model side
 
 These are the gaps that matter for a product built around a model rather than a
 database. Each is out of scope for 48 hours; none is out of scope because it is
@@ -427,25 +415,66 @@ answer that was fully generated and fully paid for. Finishing the write in a
 background task rather than inside the response generator would keep it, at the
 cost of the turn no longer being strictly tied to a request the caller is still
 listening to.
+
+### With more time — everything else
+
+- Serialised writes per conversation. Two turns sent at once interleave; see
+  [`docs/plan.md`](docs/plan.md) ambiguity 5 for exactly what competes.
 - Cursor pagination on the message list. Loading an entire conversation is fine
   at this size and will not stay fine.
+- Refreshing the model list from OpenRouter's `/api/v1/models` on a schedule
+  instead of hardcoding it. The hardcoded list skips retired models rather than
+  breaking, which gets most of the benefit — but it still ages.
 - A frontend test suite. There is none: the backend is what the brief says it
   cares about, and with the clock running that is where the tests went.
-- Metrics and request ids. The logs already say which model answered, how long
-  it took to the first token, and why any earlier one was skipped — enough to
-  debug a turn, not enough to answer "how often does the first model fail?"
-  without grepping. That is a Prometheus counter and a histogram; it is
-  infrastructure for something that runs once on a reviewer's laptop, which is
-  why it is here rather than in the code.
-- Evaluating answer *quality*. There are golden tests for the request — the
-  system prompt goes first, history is in order, both roles are included — and
-  none for the response, deliberately: free models are non-deterministic, rate
-  limited, and rotate through the fallback chain, so a scored eval set would be
-  flaky and burn the quota the demo needs. The `live` test covers the only
-  claim worth making here, that the integration works end to end.
 - Trivy on the built images in CI, and a non-root nginx.
-- Authentication: `owner_id` on the conversation, a compound index, and one
-  dependency that filters every query. Nothing in the domain would change.
+
+### And if it had to run in production
+
+Everything above is work this codebase implies. This is the shorter list of what
+changes when the target stops being a reviewer's laptop — kept brief on purpose,
+because none of it is built and a long plan for unwritten code is just a wish.
+
+**Kubernetes rather than Compose.** The API is stateless and already exposes the
+two probes a rollout needs. The decision that pays off here is
+[`/health/ready` returning 200 when the key is missing](#if-you-skip-the-key): a
+configuration mistake leaves pods in the pool serving everything except
+generation, instead of failing readiness and rolling back a release that is not
+broken. The rest is a Deployment with those probes wired, the key as a Secret, an
+HPA scaling on in-flight requests rather than CPU — the work is IO-bound on a
+provider, so CPU stays flat while latency climbs — and MongoDB moved to a managed
+replica set, which incidentally returns the
+[transactions this standalone deployment cannot have](#decisions-and-trade-offs).
+
+**A different provider, or several.** `LLMPort` is the seam. Bedrock, Vertex or a
+self-hosted model behind vLLM is a new class in `adapters/` and a line in
+`core/dependencies.py`; no service changes, which is the whole reason the port
+exists and why provider SDK exceptions are translated in the adapter rather than
+allowed to leak upward. It is also why there is no orchestration framework here:
+at one provider and one call shape, LangChain would add a dependency, an
+abstraction and a debugging layer to replace about forty lines of adapter. The
+case for it begins at tool routing, agents and retrieval chains — the next
+paragraph — not at a single chat completion.
+
+**Retrieval, when answers have to be grounded in a corpus.** Documents, specs or
+any body of reference material enter as one more port — a retriever consulted by
+the chat service before it builds the prompt — and the passages it returns are
+`Message` values like any other. The domain does not change, the store does not
+change, and the prompt assembly that already trims a window to fit is the same
+code that would trim retrieved context. Ingestion, chunking and the vector store
+are the real work and none of it is here, because the brief asked for a chatbot
+and a half-built retrieval pipeline would have cost the chat.
+
+**Observability past a single turn.** The logs already name the model that
+answered, the time to first token, and why any earlier model was skipped, which
+is enough to debug one request and useless for "how often does the first model
+fail?". That gap is a request id threaded through the response, structured JSON
+logs, and a counter and a histogram per model — infrastructure with no reader on
+a laptop, which is why it is described here instead of written.
+
+**Multi-tenancy.** `owner_id` on the conversation, a compound index, and one
+dependency that filters every query. Nothing in the domain would change, which is
+the point of having checked.
 
 ---
 
