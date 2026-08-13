@@ -45,15 +45,15 @@ so it can be resumed later.
 You need Docker with Compose v2. Nothing else.
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/lucast086/chatbot-fastapi-mongo.git
 cd chatbot-fastapi-mongo
 ./scripts/start.sh
 ```
 
-It asks for an API key — paste one and you have a working chatbot in a single
+It asks for an API key — paste one, and you have a working chatbot in a single
 pass. **Get a free key at <https://openrouter.ai/keys>**; no card is required
-for the `:free` models this project defaults to. The input is hidden, and a key
-passed as `--key` instead would end up in your shell history.
+for the `:free` models this project defaults to. **The input is hidden, and a key
+passed as `--key` instead would end up in your shell history.**
 
 Then open **<http://localhost:8080>**.
 
