@@ -11,10 +11,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.domain.models import Conversation, Message
 
-# Matches Settings.max_message_length. Declared here as a literal because a
-# Pydantic field constraint is evaluated at class definition time, before any
-# settings object exists.
-MAX_MESSAGE_LENGTH = 8000
+# A defensive ceiling, not the configured limit. A Pydantic constraint is
+# evaluated at class definition time, before any settings object exists, so this
+# cannot read MAX_MESSAGE_LENGTH — which means raising that setting above this
+# number would have no effect. The service owns the real limit and produces the
+# better message; this only stops an absurdly large body from reaching it.
+SCHEMA_CEILING = 100_000
 
 
 class ConversationSummary(BaseModel):
@@ -83,7 +85,7 @@ class CreateConversationRequest(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=MAX_MESSAGE_LENGTH)
+    content: str = Field(min_length=1, max_length=SCHEMA_CEILING)
 
     @field_validator("content")
     @classmethod

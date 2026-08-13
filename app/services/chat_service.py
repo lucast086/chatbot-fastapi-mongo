@@ -111,9 +111,16 @@ class ChatService:
         assistant_message = Message(
             id=str(uuid.uuid4()),
             conversation_id=prepared.user_message.conversation_id,
-            # A millisecond later so ordering by created_at is deterministic
-            # even when both writes land inside the same clock tick.
-            created_at=prepared.user_message.created_at + timedelta(milliseconds=1),
+            # When the answer actually arrived, with a floor of one
+            # millisecond after the question so ordering stays deterministic —
+            # BSON truncates to milliseconds, so anything closer would collide.
+            # Stamping question+1ms unconditionally made every answer claim to
+            # have arrived instantly, which threw away the only latency signal
+            # a stored transcript has.
+            created_at=max(
+                datetime.now(UTC),
+                prepared.user_message.created_at + timedelta(milliseconds=1),
+            ),
             role=MessageRole.ASSISTANT,
             content=text,
             # Whichever model actually answered — with more than one

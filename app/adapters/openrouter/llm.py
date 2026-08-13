@@ -13,6 +13,7 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
+from typing import Any
 
 import openai
 from openai import AsyncOpenAI
@@ -197,12 +198,13 @@ class OpenRouterLLM:
                         # which is the exact mistake ModelUnavailableError
                         # exists to avoid making twice.
                         saw_reasoning_only = True
-            if saw_reasoning_only:
-                logger.warning(
-                    "Model %s emitted only reasoning tokens and no answer. "
-                    "Reasoning models are not supported; pick another model.",
-                    model,
-                )
+            if saw_reasoning_only and first:
+                # Raised, not logged. Returning normally here ends the fallback
+                # loop with no chunks and no error, so the next healthy model is
+                # never tried and finish_turn reports a *retryable* outage for a
+                # permanent configuration problem — the mistake the comment
+                # above says this exists to avoid, which it did not.
+                raise ModelUnavailableError(model, "it emitted only reasoning tokens and no answer")
         except openai.AuthenticationError as exc:
             raise InvalidCredentialsError() from exc
         except openai.PermissionDeniedError as exc:
@@ -279,8 +281,14 @@ class OpenRouterTitleGenerator:
         "Reply with the title only: no quotes, no punctuation at the end, no preamble."
     )
 
-    def __init__(self, api_key: str, base_url: str, model: str, timeout_seconds: float) -> None:
-        self._model = model
+    def __init__(
+        self, api_key: str, base_url: str, models: list[str], timeout_seconds: float
+    ) -> None:
+        # The same list the chat uses. Pinning this to models[0] aimed the one
+        # call without a fallback at the most heavily used and therefore most
+        # rate-limited model, so titles failed precisely when the chat's own
+        # fallback was doing its job.
+        self._models = models
         self._configured = bool(api_key)
         self._client = AsyncOpenAI(
             api_key=api_key or "not-configured",
@@ -294,18 +302,27 @@ class OpenRouterTitleGenerator:
     async def aclose(self) -> None:
         await self._client.close()
 
+    async def _first_model_that_answers(self, question: str, answer: str) -> Any:
+        """Try each model in turn, returning the first response or None."""
+        for model in self._models:
+            try:
+                return await self._client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": self._PROMPT},
+                        {"role": "user", "content": f"User: {question}\n\nAssistant: {answer}"},
+                    ],
+                    max_tokens=24,
+                )
+            except Exception:
+                continue
+        return None
+
     async def suggest_title(self, question: str, answer: str) -> str | None:
         if not self._configured:
             return None
         try:
-            response = await self._client.chat.completions.create(
-                model=self._model,
-                messages=[
-                    {"role": "system", "content": self._PROMPT},
-                    {"role": "user", "content": f"User: {question}\n\nAssistant: {answer}"},
-                ],
-                max_tokens=24,
-            )
+            response = await self._first_model_that_answers(question, answer)
         except Exception:
             # Every failure is swallowed on purpose. The turn has already been
             # answered and stored; the fallback title is already in place. There
@@ -313,6 +330,8 @@ class OpenRouterTitleGenerator:
             logger.info("Could not generate a title; keeping the derived one.")
             return None
 
+        if response is None:
+            return None
         choices = response.choices
         if not choices or not choices[0].message.content:
             return None

@@ -137,7 +137,7 @@ absence degrades the app rather than stopping it.
 | `API_PORT` | `8000` | Published for Swagger UI and curl; not needed to use the app |
 | `MONGO_PORT` | `27017` | Published for `mongosh`; not needed either |
 | `SYSTEM_PROMPT` | a one-line instruction | Prepended to every request. Change it to change the assistant's behaviour |
-| `MAX_MESSAGE_LENGTH` | `8000` | Longest message accepted, in characters |
+| `MAX_MESSAGE_LENGTH` | `8000` | Longest message accepted, in characters. Enforced by the service, so raising it works |
 | `MAX_OUTPUT_TOKENS` | `2048` | Cap on an answer's length |
 | `REQUEST_TIMEOUT_SECONDS` | `60` | Overall timeout for one model call |
 | `MONGO_DB` | `chatbot` | Database name |
@@ -214,6 +214,12 @@ at something that was deleted. Reload.
 ### troubleshooting-validation-error
 
 **422.** The message was empty, whitespace only, or longer than 8000 characters.
+
+### troubleshooting-client-error
+
+**400 or 405.** The request itself was wrong — usually the wrong HTTP verb on a
+valid path. The `Allow` header lists what that path accepts. Not a fault in the
+application.
 
 ### troubleshooting-internal-error
 

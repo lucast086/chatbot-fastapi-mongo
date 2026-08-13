@@ -58,9 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.title_generator = OpenRouterTitleGenerator(
         api_key=settings.openrouter_api_key.get_secret_value(),
         base_url=settings.openrouter_base_url,
-        # The first model only. A title is a nicety; it does not deserve a
-        # fallback chain, and failing it costs nothing.
-        model=settings.openrouter_models[0],
+        models=settings.openrouter_models,
         timeout_seconds=settings.request_timeout_seconds,
     )
 

@@ -43,9 +43,9 @@ class ValidationError(DomainError):
 # ---------------------------------------------------------------------------
 # Model provider
 #
-# Four distinct outcomes rather than one generic failure. The backend already
-# knows which one happened, and two of the four are worth retrying while the
-# other two are not — collapsing them would throw that away and leave the client
+# Five distinct outcomes rather than one generic failure. The backend already
+# knows which one happened, and two of the five are worth retrying while the
+# rest are not — collapsing them would throw that away and leave the client
 # guessing.
 # ---------------------------------------------------------------------------
 class ProviderError(DomainError):

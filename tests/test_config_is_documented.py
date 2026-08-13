@@ -44,3 +44,27 @@ def test_every_setting_appears_in_the_example_env() -> None:
     missing = sorted(_settings_fields() - declared - INTERNAL_ONLY)
 
     assert not missing, f"settings absent from .env.example: {missing}"
+
+
+def test_every_error_reason_has_a_readme_anchor() -> None:
+    """Each error response carries a docs_url built from its `reason`. A reason
+    added without its README section produces a link to nothing.
+
+    This is the third channel of the same drift — after the spec's traceability
+    matrix and the settings table — and it caught `client_error`, added when the
+    405 handling was fixed and never documented.
+    """
+    from app.api.errors import _STATUS_BY_REASON
+
+    readme = README.read_text()
+    headings = {
+        re.sub(r"[^a-z0-9 -]", "", h.strip().lower()).replace(" ", "-")
+        for h in re.findall(r"^#{2,3} (.+)$", readme, re.M)
+    }
+    missing = sorted(
+        reason
+        for reason in _STATUS_BY_REASON
+        if f"troubleshooting-{reason.replace('_', '-')}" not in headings
+    )
+
+    assert not missing, f"docs_url points at a README section that does not exist: {missing}"

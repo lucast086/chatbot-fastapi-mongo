@@ -490,3 +490,58 @@ async def test_the_request_is_streamed_and_capped() -> None:
     # Without a cap a runaway model produces until the context ends, and a
     # single oversized answer would fail the write for the whole turn.
     assert provider.kwargs["max_tokens"] == 256
+
+
+async def test_a_reasoning_only_model_falls_back_instead_of_killing_the_turn() -> None:
+    """Reasoning models put their tokens in `reasoning` and leave `content`
+    empty. That used to end the stream with no chunks and no error, so the
+    fallback loop returned, the next healthy model was never tried, and
+    finish_turn reported a *retryable* outage for a permanent configuration
+    problem — the exact mistake ModelUnavailableError exists to prevent."""
+
+    class _ReasoningOnly(_FakeStream):
+        async def __aiter__(self) -> Any:
+            for _ in range(3):
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(content=None, reasoning="thinking...")
+                        )
+                    ]
+                )
+
+    adapter = _multi("reasoning/model", "healthy/model")
+    calls: list[str] = []
+
+    async def create(*, model: str, **_kwargs: Any) -> Any:
+        calls.append(model)
+        return _ReasoningOnly("") if model == "reasoning/model" else _FakeStream("a real answer")
+
+    adapter._client.chat.completions.create = create  # type: ignore[method-assign]
+
+    chunks = [c async for c in adapter.stream(_messages())]
+
+    assert "".join(c.text for c in chunks).strip() == "a real answer"
+    assert calls == ["reasoning/model", "healthy/model"]
+
+
+async def test_every_model_being_reasoning_only_is_not_retryable() -> None:
+    class _ReasoningOnly(_FakeStream):
+        async def __aiter__(self) -> Any:
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning="hmm"))]
+            )
+
+    adapter = _multi("a/one", "b/two")
+
+    async def create(**_kwargs: Any) -> Any:
+        return _ReasoningOnly("")
+
+    adapter._client.chat.completions.create = create  # type: ignore[method-assign]
+
+    with pytest.raises(ModelUnavailableError) as caught:
+        await _consume(adapter)
+
+    # Telling someone to retry a model that will never emit content is advice
+    # that cannot work.
+    assert caught.value.retryable is False

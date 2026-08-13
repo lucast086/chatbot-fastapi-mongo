@@ -219,7 +219,7 @@ the framework's default error shape is a breaking change that needs versioning.
 **Context.** The easy path is catching everything from the provider and returning
 503.
 
-**Decision.** Four distinct outcomes: missing key → 503 `missing_api_key`;
+**Decision.** Five distinct outcomes: missing key → 503 `missing_api_key`;
 rejected credentials → 502 `invalid_credentials`; rate limited → 429
 `rate_limited` with `Retry-After`; timeout or provider down → 504/502
 `provider_unavailable`.
@@ -571,7 +571,7 @@ affect query performance and ordering.
 **Context.** Layered architecture tends to erode: a service imports an adapter
 "just this once" and the boundary is gone.
 
-**Decision.** Three `import-linter` contracts run in CI — layers point inward,
+**Decision.** Four `import-linter` contracts run in CI — layers point inward,
 `services` cannot import `adapters`/`api`/`core`, and `domain` imports nothing
 else in the project.
 
