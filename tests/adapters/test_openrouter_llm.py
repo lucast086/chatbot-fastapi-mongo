@@ -11,7 +11,7 @@ unless a key is present.
 
 import asyncio
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -413,3 +413,80 @@ async def test_a_model_that_goes_quiet_is_abandoned_and_the_next_is_tried() -> N
 
     assert "".join(c.text for c in chunks).strip() == "here I am"
     assert calls == ["silent/model", "talkative/model"]
+
+
+# ---------------------------------------------------------------------------
+# What we actually send to the provider
+#
+# Nothing verified this before. The adapter builds the request — system prompt
+# first, roles mapped, history in order — and none of it was asserted, so
+# dropping assistant turns from the payload would silently destroy multi-turn
+# context while the whole suite stayed green. Deterministic and offline: this
+# is the request, not the answer.
+# ---------------------------------------------------------------------------
+
+
+class _RecordingProvider:
+    def __init__(self) -> None:
+        self.payload: list[dict[str, str]] = []
+        self.kwargs: dict[str, Any] = {}
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.payload = list(kwargs["messages"])
+        self.kwargs = kwargs
+        return _FakeStream("ok")
+
+
+def _conversation() -> list[Message]:
+    now = datetime.now(UTC)
+    roles = [
+        (MessageRole.USER, "first question"),
+        (MessageRole.ASSISTANT, "first answer"),
+        (MessageRole.USER, "second question"),
+    ]
+    return [
+        Message(
+            id=f"m{i}",
+            conversation_id="c1",
+            role=role,
+            content=content,
+            created_at=now + timedelta(seconds=i),
+        )
+        for i, (role, content) in enumerate(roles)
+    ]
+
+
+async def _record(adapter: OpenRouterLLM, messages: list[Message]) -> _RecordingProvider:
+    provider = _RecordingProvider()
+    adapter._client.chat.completions.create = provider.create  # type: ignore[method-assign]
+    [_ async for _ in adapter.stream(messages)]
+    return provider
+
+
+async def test_the_system_prompt_goes_first_and_only_once() -> None:
+    provider = await _record(_adapter(), _conversation())
+
+    assert provider.payload[0] == {"role": "system", "content": "You are helpful."}
+    assert sum(1 for m in provider.payload if m["role"] == "system") == 1
+
+
+async def test_history_is_sent_in_order_with_both_roles() -> None:
+    """Dropping the assistant turns would destroy multi-turn context — the
+    product's whole point — without failing anything else."""
+    provider = await _record(_adapter(), _conversation())
+
+    assert [(m["role"], m["content"]) for m in provider.payload[1:]] == [
+        ("user", "first question"),
+        ("assistant", "first answer"),
+        ("user", "second question"),
+    ]
+
+
+async def test_the_request_is_streamed_and_capped() -> None:
+    provider = await _record(_adapter(), _conversation())
+
+    assert provider.kwargs["stream"] is True
+    assert provider.kwargs["model"] == "test/model"
+    # Without a cap a runaway model produces until the context ends, and a
+    # single oversized answer would fail the write for the whole turn.
+    assert provider.kwargs["max_tokens"] == 256

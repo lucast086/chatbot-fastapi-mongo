@@ -11,6 +11,7 @@ service and the router.
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 
 import openai
@@ -121,6 +122,7 @@ class OpenRouterLLM:
         so a mid-stream failure propagates and becomes a failed turn.
         """
         saw_reasoning_only = False
+        started_at = time.monotonic()
 
         # Built role by role rather than from `m.role.value`, which is a plain
         # str: the SDK types each role as a Literal. Suppressing that mismatch
@@ -175,6 +177,15 @@ class OpenRouterLLM:
                         continue
                     delta = chunk.choices[0].delta
                     if delta.content:
+                        if first:
+                            # The number that decides whether this feels fast.
+                            # Logged per turn because it is also how you tell a
+                            # slow model from a stalled one without guessing.
+                            logger.info(
+                                "Model %s answered in %.1fs to first token",
+                                model,
+                                time.monotonic() - started_at,
+                            )
                         first = False
                         yield Chunk(text=delta.content, model=model)
                     elif _reasoning_of(delta):

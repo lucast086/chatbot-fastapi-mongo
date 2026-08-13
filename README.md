@@ -366,8 +366,18 @@ retired — four categories looked complete until something real disagreed.
   at this size and will not stay fine.
 - A frontend test suite. There is none: the backend is what the brief says it
   cares about, and with the clock running that is where the tests went.
-- Structured logging with request ids, and metrics. Right now debugging a
-  provider failure means reading container logs.
+- Metrics and request ids. The logs already say which model answered, how long
+  it took to the first token, and why any earlier one was skipped — enough to
+  debug a turn, not enough to answer "how often does the first model fail?"
+  without grepping. That is a Prometheus counter and a histogram; it is
+  infrastructure for something that runs once on a reviewer's laptop, which is
+  why it is here rather than in the code.
+- Evaluating answer *quality*. There are golden tests for the request — the
+  system prompt goes first, history is in order, both roles are included — and
+  none for the response, deliberately: free models are non-deterministic, rate
+  limited, and rotate through the fallback chain, so a scored eval set would be
+  flaky and burn the quota the demo needs. The `live` test covers the only
+  claim worth making here, that the integration works end to end.
 - Trivy on the built images in CI, and a non-root nginx.
 - Authentication: `owner_id` on the conversation, a compound index, and one
   dependency that filters every query. Nothing in the domain would change.
