@@ -6,8 +6,37 @@
 You type a message, a language model answers, and the conversation is persisted
 so it can be resumed later.
 
-**Stack:** Python 3.13 · FastAPI · MongoDB · React + Vite served by nginx ·
-OpenRouter through the OpenAI SDK.
+**In a hurry?** [Run it](#run-it) is three commands.
+**Here to review?** [Decisions and trade-offs](#decisions-and-trade-offs) and
+[AI usage](#ai-usage) are the parts worth your time.
+
+---
+
+## Contents
+
+- [Run it](#run-it) · [add a key](#add-a-model-provider-key) · [try it](#try-it)
+- [What it does](#what-it-does) — and [what it deliberately does not](#what-it-deliberately-does-not-do)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting) — one section per error `reason`
+- [Development](#development) — [architecture](#architecture), [project layout](#project-layout)
+- [Decisions and trade-offs](#decisions-and-trade-offs) — and [with more time](#with-more-time)
+- [AI usage](#ai-usage)
+- [Documentation](#documentation)
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why, in one line |
+|---|---|---|
+| Language | Python 3.13, managed by `uv` | One tool for the interpreter and the lock file, no `sudo` to reproduce |
+| API | FastAPI | Required by the brief |
+| Database | MongoDB, via `pymongo`'s `AsyncMongoClient` | Required by the brief. Not `motor` — it is deprecated and the async driver now ships inside `pymongo` |
+| Model provider | OpenRouter, through the OpenAI SDK | OpenAI-compatible, so the adapter works against any such endpoint including a local one |
+| Frontend | React + Vite, built and served by nginx | One origin, no CORS, one URL to hand a reviewer |
+| Tests | pytest, against a real MongoDB and a faked model | Faking the database would hide the bugs adapters actually have |
+| Quality gates | ruff, mypy `--strict`, import-linter | The architecture is enforced by the build, not by review |
+| CI | GitHub Actions | Native badge, checks visible where the code is |
 
 ---
 
@@ -223,18 +252,69 @@ uv run pytest -m live    # needs OPENROUTER_API_KEY
 
 ### Architecture
 
+Ports and adapters. Dependencies point inward, and the arrow never reverses:
+
 ```
-app/api/       HTTP: routers, schemas, the single error envelope
-app/services/  business logic — knows ports, never implementations
-app/domain/    entities, errors, Protocol ports. Pure Python.
-app/adapters/  MongoDB and OpenRouter. The only code aware of a technology.
-app/core/      configuration and dependency wiring
+        api ──▶ services ──▶ domain ◀── adapters
+                                 ▲
+                               core (wires the two sides together)
 ```
 
-Three `import-linter` contracts enforce this in CI rather than by convention:
-layers point inward, `services` cannot import `adapters`, and `domain` imports
-nothing else in the project. The build fails if any of them is broken, which is
-what makes this description a fact rather than an intention.
+| Layer | Knows about | Never knows about |
+|---|---|---|
+| `api` | HTTP, services, domain | MongoDB, OpenRouter |
+| `services` | domain ports | any concrete implementation, HTTP |
+| `domain` | nothing else in the project | everything |
+| `adapters` | domain | HTTP, services, configuration |
+| `core` | all of it — the composition root | — |
+
+**Four `import-linter` contracts enforce this in CI**, not by convention. The
+build fails if any is broken, which is what makes the table above a fact rather
+than an intention.
+
+The fourth one — `adapters` may only know the domain — was added after an AI
+review pointed out that the first three left the adapter ring completely
+unconstrained: an adapter importing `app.api.errors`, the textbook violation,
+passed all of them. Verified by introducing exactly that import and watching CI
+stay green.
+
+### Project layout
+
+```
+app/
+├── api/
+│   ├── errors.py              Domain errors → HTTP. The one error envelope.
+│   ├── schemas.py             Pydantic wire models. Never reach the domain.
+│   └── routers/
+│       ├── conversations.py   CRUD + the JSON message endpoint
+│       └── streaming.py       The SSE variant
+├── services/
+│   ├── chat_service.py        The turn lifecycle. See docs/specs/.
+│   └── conversation_service.py
+├── domain/
+│   ├── models.py              Frozen dataclasses. No Pydantic, no bson.
+│   ├── errors.py              The provider error taxonomy
+│   └── ports/                 Protocols: the store and the model
+├── adapters/
+│   ├── mongo/                 Connection, indexes, the conversation store
+│   └── openrouter/            The model client and the fallback chain
+├── core/
+│   ├── config.py              pydantic-settings; every value has a default
+│   └── dependencies.py        The only module importing both ports and adapters
+└── main.py                    Lifespan, health checks, /config
+
+frontend/                      React + Vite, built and served by nginx
+tests/
+├── adapters/                  Against a real MongoDB; the model is faked
+├── api/                       HTTP contract: status codes, the envelope
+├── services/                  Business logic against doubles
+└── test_spec_traceability.py  Fails if the spec names a test that does not exist
+docs/
+├── plan.md                    Scope, and the brief's ambiguities resolved
+├── decisions.md               One entry per decision, each argued against itself
+├── ai-usage.md                Tooling, and every rejected suggestion
+└── specs/conversations.md     Behaviour spec, written before the code
+```
 
 ---
 
