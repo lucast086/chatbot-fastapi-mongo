@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # future work.
     history_limit: int = Field(default=20, gt=0)
     max_message_length: int = Field(default=8000, gt=0)
+    # A ceiling on the prompt, counted in characters. HISTORY_LIMIT alone bounds
+    # the number of messages, not their size: twenty messages of 8000 characters
+    # is far past the context window of several free models, and that surfaces
+    # as a provider error rather than a graceful truncation. Characters rather
+    # than tokens because the right tokenizer differs per model; roughly four
+    # characters per token, so 24000 is about 6k tokens.
+    max_history_chars: int = Field(default=24_000, gt=0)
     # One extra provider call after the first turn of a conversation, to replace
     # the truncated first message with a real title. Off-switch provided because
     # it doubles the requests a first turn costs, which matters on a free tier.

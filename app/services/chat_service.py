@@ -32,6 +32,7 @@ class ChatService:
         llm: LLMPort,
         history_limit: int,
         max_message_length: int,
+        max_history_chars: int = 24_000,
         titles: TitleGeneratorPort | None = None,
         provider_configured: bool = True,
     ) -> None:
@@ -42,6 +43,7 @@ class ChatService:
         self._provider_configured = provider_configured
         self._history_limit = history_limit
         self._max_message_length = max_message_length
+        self._max_history_chars = max_history_chars
         # Optional: without it, conversations keep the title derived from their
         # first message, which is already good enough to navigate by.
         self._titles = titles
@@ -87,9 +89,32 @@ class ChatService:
         )
         return PreparedTurn(
             conversation=conversation,
-            history=history,
+            history=self._within_budget(history, len(text)),
             user_message=user_message,
         )
+
+    def _within_budget(self, history: list[Message], reserved: int) -> list[Message]:
+        """Drop the oldest messages until the prompt fits the character budget.
+
+        The message count alone does not bound prompt size, so a long
+        conversation can exceed a model's context window — which arrives as a
+        provider error rather than a degradation. Trimming from the oldest end
+        keeps the most recent exchange, which is the part that matters.
+        """
+        budget = self._max_history_chars - reserved
+        kept: list[Message] = []
+        for message in reversed(history):
+            budget -= len(message.content)
+            if budget < 0:
+                break
+            kept.append(message)
+        if len(kept) < len(history):
+            logger.info(
+                "History trimmed to %d of %d messages to fit the character budget.",
+                len(kept),
+                len(history),
+            )
+        return list(reversed(kept))
 
     async def stream_turn(self, prepared: "PreparedTurn") -> AsyncIterator[Chunk]:
         """Yield the answer as it arrives. Nothing is persisted here."""

@@ -131,7 +131,8 @@ absence degrades the app rather than stopping it.
 | `OPENROUTER_MODELS` | three free models | Comma separated, tried in order. See [rate limits](#troubleshooting-rate-limited) |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint, including a local one |
 | `FIRST_TOKEN_TIMEOUT_SECONDS` | `20` | How long to wait for a model's first token before trying the next |
-| `HISTORY_LIMIT` | `20` | Messages sent as context. A count, not a token budget |
+| `HISTORY_LIMIT` | `20` | How many messages are sent as context |
+| `MAX_HISTORY_CHARS` | `24000` | Ceiling on the whole prompt. Oldest messages are dropped to fit, rather than letting the provider reject it |
 | `GENERATE_TITLES` | `true` | One extra call after the first turn. `false` halves what a first turn costs |
 | `WEB_PORT` | `8080` | The port you open |
 | `API_PORT` | `8000` | Published for Swagger UI and curl; not needed to use the app |

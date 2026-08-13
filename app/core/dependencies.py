@@ -76,6 +76,7 @@ def get_chat_service(
         llm=llm,
         history_limit=settings.history_limit,
         max_message_length=settings.max_message_length,
+        max_history_chars=settings.max_history_chars,
         titles=titles if settings.generate_titles else None,
         provider_configured=settings.provider_configured,
     )

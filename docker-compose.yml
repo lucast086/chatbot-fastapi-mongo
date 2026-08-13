@@ -47,6 +47,7 @@ services:
       REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-60}
       FIRST_TOKEN_TIMEOUT_SECONDS: ${FIRST_TOKEN_TIMEOUT_SECONDS:-20}
       HISTORY_LIMIT: ${HISTORY_LIMIT:-20}
+      MAX_HISTORY_CHARS: ${MAX_HISTORY_CHARS:-24000}
       GENERATE_TITLES: ${GENERATE_TITLES:-true}
     # Published as well as proxied, so Swagger UI at /docs and a direct curl
     # are available without going through nginx. Set API_PORT to change it if

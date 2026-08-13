@@ -318,3 +318,30 @@ async def test_a_complete_answer_is_not_marked_truncated(
     _, assistant, _ = await service.send_message("c1", "hi")
 
     assert assistant.truncated is False
+
+
+async def test_history_is_trimmed_to_fit_the_character_budget(
+    store: FakeConversationStore,
+) -> None:
+    """HISTORY_LIMIT bounds the number of messages, not their size. Without a
+    character ceiling a long conversation exceeds the model's context window,
+    and that arrives as a provider error instead of a degradation."""
+    llm = FakeLLM()
+    service = ChatService(
+        store=store,
+        llm=llm,
+        history_limit=50,
+        max_message_length=8000,
+        max_history_chars=400,
+    )
+    for _ in range(6):
+        await _service(store, FakeLLM(reply="x" * 100)).send_message("c1", "y" * 100)
+
+    await service.send_message("c1", "the newest question")
+
+    context = llm.received[-1]
+    used = sum(len(m.content) for m in context)
+    assert used <= 400
+    # Trimmed from the oldest end, so the newest exchange survives.
+    assert context[-1].content == "the newest question"
+    assert len(context) < 13
