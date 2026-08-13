@@ -239,6 +239,12 @@ export default function App() {
                 {message.model && <em className="by"> · {message.model}</em>}
               </span>
               <p>{message.content || (message.role === "assistant" ? "Thinking…" : "")}</p>
+              {message.truncated && (
+                <p className="truncated">
+                  This answer hit the output limit and is cut off. Raise
+                  <code> MAX_OUTPUT_TOKENS</code> or ask for something shorter.
+                </p>
+              )}
             </article>
           ))}
 

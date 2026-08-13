@@ -268,6 +268,11 @@ class _ScriptedProvider:
         return _FakeStream(str(outcome))
 
 
+def _choice(content: str | None, finish_reason: str | None = None, **extra: Any) -> Any:
+    delta = SimpleNamespace(content=content, **extra)
+    return SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=finish_reason)])
+
+
 class _FakeStream:
     def __init__(self, text: str) -> None:
         self._text = text
@@ -279,10 +284,12 @@ class _FakeStream:
         return None
 
     async def __aiter__(self) -> Any:
-        for word in self._text.split(" "):
-            yield SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content=word + " "))]
-            )
+        words = self._text.split(" ")
+        for i, word in enumerate(words):
+            # finish_reason is present on every choice in the real SDK and only
+            # set on the last one. A double that omits it lets the adapter read
+            # an attribute that does not exist.
+            yield _choice(word + " ", "stop" if i == len(words) - 1 else None)
 
 
 def _script(adapter: OpenRouterLLM, script: dict[str, object]) -> _ScriptedProvider:
@@ -364,7 +371,7 @@ async def test_no_fallback_once_the_stream_has_started() -> None:
 
     class _FailsMidStream(_FakeStream):
         async def __aiter__(self) -> Any:
-            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="par"))])
+            yield _choice("par")
             raise openai.RateLimitError("slow down", response=_response(429), body=None)
 
     adapter = _multi("first/model", "second/model")
@@ -502,13 +509,7 @@ async def test_a_reasoning_only_model_falls_back_instead_of_killing_the_turn() -
     class _ReasoningOnly(_FakeStream):
         async def __aiter__(self) -> Any:
             for _ in range(3):
-                yield SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            delta=SimpleNamespace(content=None, reasoning="thinking...")
-                        )
-                    ]
-                )
+                yield _choice(None, reasoning="thinking...")
 
     adapter = _multi("reasoning/model", "healthy/model")
     calls: list[str] = []
@@ -528,9 +529,7 @@ async def test_a_reasoning_only_model_falls_back_instead_of_killing_the_turn() -
 async def test_every_model_being_reasoning_only_is_not_retryable() -> None:
     class _ReasoningOnly(_FakeStream):
         async def __aiter__(self) -> Any:
-            yield SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning="hmm"))]
-            )
+            yield _choice(None, reasoning="hmm")
 
     adapter = _multi("a/one", "b/two")
 

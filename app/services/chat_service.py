@@ -6,6 +6,7 @@ write leaves the conversation exactly as it was, which is what makes a retry
 safe without an idempotency key.
 """
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from app.domain.errors import (
 from app.domain.models import Chunk, Conversation, Message, MessageRole
 from app.domain.ports import ConversationStorePort, LLMPort, TitleGeneratorPort
 from app.services.conversation_service import DEFAULT_TITLE, derive_title
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -126,6 +129,7 @@ class ChatService:
             # Whichever model actually answered — with more than one
             # configured, that is not necessarily the first.
             model=chunks[-1].model,
+            truncated=chunks[-1].finish_reason == "length",
         )
 
         # Only name a conversation that has not been named. A later turn must
@@ -133,6 +137,12 @@ class ChatService:
         title = None
         if prepared.conversation.title == DEFAULT_TITLE and not prepared.history:
             title = derive_title(prepared.user_message.content)
+
+        if assistant_message.truncated:
+            logger.warning(
+                "Model %s hit the output cap; the stored answer is cut off.",
+                assistant_message.model,
+            )
 
         await self._store.add_turn([prepared.user_message, assistant_message], title=title)
 

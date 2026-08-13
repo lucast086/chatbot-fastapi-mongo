@@ -42,6 +42,8 @@ export interface Message {
   created_at: string;
   /** Which model produced this answer. Null on user messages. */
   model?: string | null;
+  /** The provider stopped at the output cap, so this answer is cut off. */
+  truncated?: boolean;
 }
 
 export interface ConversationDetail extends ConversationSummary {

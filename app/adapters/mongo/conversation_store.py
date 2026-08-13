@@ -113,6 +113,7 @@ def _message_to_mongo(message: Message) -> dict[str, Any]:
         "content": message.content,
         "created_at": message.created_at,
         "model": message.model,
+        "truncated": message.truncated,
     }
 
 
@@ -124,4 +125,5 @@ def _message_from_mongo(raw: dict[str, Any]) -> Message:
         content=raw["content"],
         created_at=raw["created_at"],
         model=raw.get("model"),
+        truncated=bool(raw.get("truncated")),
     )

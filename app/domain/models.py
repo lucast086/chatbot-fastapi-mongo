@@ -22,6 +22,10 @@ class Message:
     role: MessageRole
     content: str
     created_at: datetime
+    # True when the provider stopped at the output cap rather than finishing.
+    # Stored because a cut-off answer is otherwise indistinguishable from a
+    # complete one, for the reader and for anyone debugging later.
+    truncated: bool = False
     # Only ever set on assistant messages: which model produced this answer.
     # Useful when the configured model changes between sessions, which on a
     # rotating free tier it does.
@@ -48,6 +52,10 @@ class Chunk:
 
     text: str
     model: str
+    # Set on the final chunk only. "length" means the provider stopped at the
+    # output cap, so the answer is cut off mid-thought — indistinguishable from
+    # a complete one without this.
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True)

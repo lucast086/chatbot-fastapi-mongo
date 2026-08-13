@@ -123,6 +123,7 @@ class OpenRouterLLM:
         so a mid-stream failure propagates and becomes a failed turn.
         """
         saw_reasoning_only = False
+        finish_reason: str | None = None
         started_at = time.monotonic()
 
         # Built role by role rather than from `m.role.value`, which is a plain
@@ -176,6 +177,8 @@ class OpenRouterLLM:
 
                     if not chunk.choices:
                         continue
+                    if chunk.choices[0].finish_reason:
+                        finish_reason = chunk.choices[0].finish_reason
                     delta = chunk.choices[0].delta
                     if delta.content:
                         if first:
@@ -198,6 +201,13 @@ class OpenRouterLLM:
                         # which is the exact mistake ModelUnavailableError
                         # exists to avoid making twice.
                         saw_reasoning_only = True
+            if not first:
+                # A terminal chunk carrying only the finish reason, which the
+                # provider sends last. Buffering a real chunk to attach it would
+                # delay every token by one, which is the wrong trade on a
+                # streaming product; an empty text costs nothing when joined.
+                yield Chunk(text="", model=model, finish_reason=finish_reason)
+
             if saw_reasoning_only and first:
                 # Raised, not logged. Returning normally here ends the fallback
                 # loop with no chunks and no error, so the next healthy model is

@@ -296,3 +296,25 @@ async def test_titles_are_only_generated_for_the_first_turn(
     # is already navigating by, and must not spend a request doing it.
     assert titles.calls == 1
     assert store.conversations["c1"].title == "Making carbonara"
+
+
+async def test_an_answer_cut_off_at_the_output_cap_is_marked_truncated(
+    store: FakeConversationStore,
+) -> None:
+    """Without this the reader sees a sentence that stops mid-thought and has no
+    way to know the model was cut off rather than finished."""
+    service = _service(store, FakeLLM(reply="a long answer", finish_reason="length"))
+
+    _, assistant, _ = await service.send_message("c1", "hi")
+
+    assert assistant.truncated is True
+
+
+async def test_a_complete_answer_is_not_marked_truncated(
+    store: FakeConversationStore,
+) -> None:
+    service = _service(store, FakeLLM(reply="done", finish_reason="stop"))
+
+    _, assistant, _ = await service.send_message("c1", "hi")
+
+    assert assistant.truncated is False

@@ -85,10 +85,12 @@ class FakeLLM:
         reply: str = "A fake answer.",
         error: ProviderError | None = None,
         model: str = "fake/model",
+        finish_reason: str = "stop",
     ) -> None:
         self._reply = reply
         self._error = error
         self._model = model
+        self._finish_reason = finish_reason
         self.received: list[list[Message]] = []
 
     async def stream(self, messages: list[Message]) -> AsyncIterator[Chunk]:
@@ -97,8 +99,13 @@ class FakeLLM:
             raise self._error
         # Several chunks, not one: the JSON path joins them, and yielding a
         # single chunk would let a broken join pass unnoticed.
-        for word in self._reply.split(" "):
-            yield Chunk(text=word + " ", model=self._model)
+        words = self._reply.split(" ")
+        for i, word in enumerate(words):
+            yield Chunk(
+                text=word + " ",
+                model=self._model,
+                finish_reason=self._finish_reason if i == len(words) - 1 else None,
+            )
 
 
 class FakeTitleGenerator:

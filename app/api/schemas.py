@@ -46,6 +46,8 @@ class MessageOut(BaseModel):
     # and tried in order — without it a fallback would silently change the
     # answer's provenance. Always null on user messages.
     model: str | None = None
+    # The provider stopped at the output cap, so this answer is cut off.
+    truncated: bool = False
 
     @classmethod
     def from_domain(cls, message: Message) -> "MessageOut":
@@ -55,6 +57,7 @@ class MessageOut(BaseModel):
             content=message.content,
             created_at=message.created_at,
             model=message.model,
+            truncated=message.truncated,
         )
 
 

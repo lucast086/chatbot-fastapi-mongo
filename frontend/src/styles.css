@@ -115,6 +115,8 @@ main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 /* Which model answered. Shown so a fallback to another free model is visible
    rather than a silent change in answer quality. */
 .message .by { font-style: normal; opacity: 0.65; }
+/* A cut-off answer looks exactly like a complete one otherwise. */
+.message .truncated { margin-top: 6px; font-size: 12px; color: var(--med, #d6ab5c); }
 .message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message.user p { color: #cdd4e0; }
 .message.pending { color: var(--muted); max-width: 720px; margin: 0 auto; }
