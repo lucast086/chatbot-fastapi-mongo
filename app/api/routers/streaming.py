@@ -20,7 +20,13 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.api.errors import error_body, error_response, status_for
+from app.api.errors import (
+    PROVIDER_REASONS,
+    error_body,
+    error_response,
+    openapi_responses,
+    status_for,
+)
 from app.api.schemas import SendMessageRequest
 from app.core.dependencies import ChatServiceDep
 from app.domain.errors import DomainError
@@ -37,7 +43,17 @@ def _event(name: str, payload: dict[str, object]) -> str:
 
 # response_model=None because this route answers with either a stream or a JSON
 # error, and FastAPI cannot build one response model from that union.
-@router.post("/{conversation_id}/messages/stream", response_model=None)
+@router.post(
+    "/{conversation_id}/messages/stream",
+    response_model=None,
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "chunk / done / error events",
+        },
+        **openapi_responses("not_found", "validation_error", *PROVIDER_REASONS),
+    },
+)
 async def stream_message(
     conversation_id: str,
     body: SendMessageRequest,

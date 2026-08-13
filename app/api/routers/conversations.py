@@ -7,6 +7,7 @@ errors and formatted once by the handlers in `api/errors.py`, so there is no
 
 from fastapi import APIRouter, Query, status
 
+from app.api.errors import PROVIDER_REASONS, openapi_responses
 from app.api.schemas import (
     ConversationDetail,
     ConversationSummary,
@@ -20,7 +21,9 @@ from app.core.dependencies import ChatServiceDep, ConversationServiceDep
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=openapi_responses("validation_error")
+)
 async def create_conversation(
     body: CreateConversationRequest,
     service: ConversationServiceDep,
@@ -43,7 +46,7 @@ async def list_conversations(
     return [ConversationSummary.from_domain(c) for c in conversations]
 
 
-@router.get("/{conversation_id}")
+@router.get("/{conversation_id}", responses=openapi_responses("not_found"))
 async def get_conversation(
     conversation_id: str,
     service: ConversationServiceDep,
@@ -52,7 +55,11 @@ async def get_conversation(
     return ConversationDetail.from_domain(conversation, messages)
 
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=openapi_responses("not_found"),
+)
 async def delete_conversation(
     conversation_id: str,
     service: ConversationServiceDep,
@@ -60,7 +67,11 @@ async def delete_conversation(
     await service.delete(conversation_id)
 
 
-@router.post("/{conversation_id}/messages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{conversation_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+    responses=openapi_responses("not_found", "validation_error", *PROVIDER_REASONS),
+)
 async def send_message(
     conversation_id: str,
     body: SendMessageRequest,

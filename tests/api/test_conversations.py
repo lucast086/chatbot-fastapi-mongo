@@ -166,3 +166,21 @@ def test_a_stored_answer_reports_which_model_produced_it(
 
     assert body["assistant_message"]["model"] == "second/model"
     assert body["user_message"]["model"] is None
+
+
+def test_openapi_documents_the_error_envelope(client: TestClient) -> None:
+    """The single envelope is the API's defining decision; a generated client
+    that only knows FastAPI's default validation shape cannot parse anything the
+    API actually sends."""
+    spec = client.get("/openapi.json").json()
+    send = spec["paths"]["/api/v1/conversations/{conversation_id}/messages"]["post"]["responses"]
+
+    # The statuses the taxonomy exists to distinguish.
+    for status in ("404", "422", "429", "502", "503", "504"):
+        assert status in send, f"{status} is undocumented"
+
+    schema = send["429"]["content"]["application/json"]["schema"]
+    ref = schema.get("$ref", "")
+    assert ref.endswith("ErrorResponse"), f"429 documents {ref or schema}, not the envelope"
+    fields = spec["components"]["schemas"]["ErrorResponse"]["properties"]
+    assert {"reason", "message", "retryable", "docs_url"} <= set(fields)

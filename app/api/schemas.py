@@ -116,3 +116,18 @@ class ConfigResponse(BaseModel):
     models: list[str]
     streaming_enabled: bool
     docs_url: str
+
+
+class ErrorResponse(BaseModel):
+    """The one shape every error in this API returns.
+
+    Declared so it reaches OpenAPI too. Without it a generated client sees only
+    FastAPI's default validation shape and cannot parse anything the API
+    actually sends — the central design decision would stop at the code.
+    """
+
+    reason: str
+    message: str
+    retryable: bool
+    docs_url: str
+    retry_after: int | None = None

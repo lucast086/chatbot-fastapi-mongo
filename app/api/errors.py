@@ -41,6 +41,34 @@ _STATUS_BY_REASON = {
 }
 
 
+def openapi_responses(*reasons: str) -> dict[int | str, dict[str, Any]]:
+    """OpenAPI `responses` for the given error reasons.
+
+    Applied per route so the documented contract matches what the handlers
+    return, including the status codes the taxonomy exists to distinguish.
+    """
+    from app.api.schemas import ErrorResponse
+
+    seen: dict[int | str, dict[str, Any]] = {}
+    for reason in reasons:
+        status = status_for(reason)
+        existing = seen.get(status)
+        if existing:
+            existing["description"] += f" / {reason}"
+            continue
+        seen[status] = {"model": ErrorResponse, "description": reason}
+    return seen
+
+
+PROVIDER_REASONS = (
+    "missing_api_key",
+    "invalid_credentials",
+    "rate_limited",
+    "model_unavailable",
+    "provider_unavailable",
+)
+
+
 def status_for(reason: str) -> int:
     """The HTTP status a domain reason maps to."""
     return _STATUS_BY_REASON.get(reason, 500)
