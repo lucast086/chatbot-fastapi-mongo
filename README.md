@@ -14,7 +14,7 @@ so it can be resumed later.
 
 ## Contents
 
-- [Run it](#run-it) · [add a key](#add-a-model-provider-key) · [try it](#try-it)
+- [Run it](#run-it) · [without the script](#or-without-the-script) · [try it](#try-it) · [if you skip the key](#if-you-skip-the-key)
 - [What it does](#what-it-does) — and [what it deliberately does not](#what-it-deliberately-does-not-do)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting) — one section per error `reason`
@@ -47,25 +47,24 @@ You need Docker with Compose v2. Nothing else.
 ```bash
 git clone <this-repo>
 cd chatbot-fastapi-mongo
-docker compose up
+./scripts/start.sh
 ```
+
+It asks for an API key — paste one and you have a working chatbot in a single
+pass. **Get a free key at <https://openrouter.ai/keys>**; no card is required
+for the `:free` models this project defaults to. The input is hidden, and a key
+passed as `--key` instead would end up in your shell history.
 
 Then open **<http://localhost:8080>**.
 
-That works with no configuration at all: MongoDB starts, the UI loads, and you
-can create, list and delete conversations. What you cannot do yet is get an
-answer — the app tells you so with a banner instead of failing.
+### Or without the script
 
-### Add a model provider key
+The script only sets the key and calls Compose. Nothing depends on it:
 
 ```bash
-cp .env.example .env
-# put your key in OPENROUTER_API_KEY
-docker compose up -d
+cp .env.example .env     # then put your key in OPENROUTER_API_KEY
+docker compose up
 ```
-
-Get a free key at <https://openrouter.ai/keys>. No card is required for the
-`:free` models this project defaults to.
 
 ### Try it
 
@@ -87,6 +86,17 @@ Interactive API docs: <http://localhost:8000/docs>.
 **Check that it persists:** send a message, then `docker compose down &&
 docker compose up -d`, reload the page. The conversation is still there.
 `docker compose down -v` is what wipes it.
+
+### If you skip the key
+
+Press Enter at the prompt, or run `docker compose up` with no `.env` at all.
+The app starts, MongoDB starts, the UI loads, and you can create, list and
+delete conversations. Only answering messages fails, and it says so with a
+banner when the page opens rather than after you have typed something.
+
+This is deliberate — a missing key is a configuration state, not a crash — and
+it is why `/health/ready` returns 200 with `"status": "degraded"` instead of
+failing. See [`missing_api_key`](#troubleshooting-missing-api-key).
 
 ---
 
@@ -238,10 +248,13 @@ Plain `down` does not.
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # if you do not have uv
 uv sync
-
-./scripts/test.sh    # tests (starts MongoDB, stops it if it started it)
-./scripts/lint.sh    # ruff, mypy --strict, import-linter
 ```
+
+| Script | What it does, and why it exists |
+|---|---|
+| `./scripts/start.sh` | Sets the API key and brings the stack up in one pass. A wrapper around Compose, not a dependency. |
+| `./scripts/test.sh` | Runs the suite. Starts MongoDB first and stops it again **only if this script started it**, so it does not kill a session you already had open. |
+| `./scripts/lint.sh` | Exactly the checks the CI `quality` job runs — ruff, `mypy --strict`, import-linter — so you find a failure here instead of on a pull request. |
 
 Tests need neither an API key nor a network. The one test that talks to the real
 provider is marked `live`, skipped without a key, and excluded from CI:

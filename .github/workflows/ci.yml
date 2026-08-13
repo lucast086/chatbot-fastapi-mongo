@@ -135,6 +135,16 @@ jobs:
       # command, and a working app. Asserted here rather than trusted.
       - name: Start the stack with no .env present
         run: docker compose up -d --build --wait
+      # The start script is the path the README puts first, so it has to be
+      # exercised too — a convenience script nobody runs in CI is one that rots
+      # unnoticed. Piped Enter is "skip the key", which is the only path
+      # available here.
+      - name: The start script also works, and skipping the key is allowed
+        run: |
+          set -euo pipefail
+          docker compose down
+          printf '\n' | ./scripts/start.sh
+          curl -sf http://localhost:8080/api/v1/config | grep -q '"provider_configured":false'
       - name: The app is served and reports a missing key rather than crashing
         run: |
           set -euo pipefail

@@ -431,6 +431,45 @@ and one Pydantic model is the honest answer.
 
 ---
 
+## A start script, after deciding against one
+
+**Context.** `docker compose up` is the path the brief names, and it works with
+no configuration. But the first run without a key produces a working app that
+cannot answer, so the actual sequence to a usable chatbot was: start, notice the
+banner, stop, create `.env`, paste the key, start again.
+
+**Decision.** `scripts/start.sh` asks for the key, writes `.env` and brings the
+stack up. It is the first thing the README shows. `docker compose up` is
+documented immediately below it and is still what CI verifies.
+
+**This reverses an earlier decision.** Setup scripts were deliberately left out,
+on the grounds that a second front door makes a reviewer wonder which one is the
+real one. That risk is real and has not gone away — it is handled by ranking the
+two rather than hiding either, and by the script being a wrapper that does
+nothing Compose cannot do.
+
+What changed is the weight on the other side. Watching someone use the project
+made the two-pass start look like what it is: friction on the one path that
+matters most, in service of preserving a demonstration that a subsection
+preserves just as well.
+
+**Why the prompt rather than only a flag.** An API key passed as a command-line
+argument is written to shell history in plain text and is visible to `ps` while
+the process runs. `--key` exists for automation; the hidden prompt is the
+default. The script also never echoes the key, writes `.env` through a temp file
+so a failure cannot truncate it, and refuses to overwrite a key that is already
+there.
+
+**What did not change.** Starting without a key still works and is still
+documented — moved from the top of the README to its own subsection, with the
+reasoning intact. It answers a question the brief asks explicitly, so removing
+it would have cost more than the friction did.
+
+**When this would NOT apply.** If the project had no secret to configure, the
+script would be a wrapper around a single command and pure noise.
+
+---
+
 ## `uv` for the Python toolchain
 
 **Context.** The project targets Python 3.13. Getting that interpreter plus a
