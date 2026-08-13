@@ -382,6 +382,51 @@ retired — four categories looked complete until something real disagreed.
 - Refreshing the model list from OpenRouter's `/api/v1/models` on a schedule
   instead of hardcoding it. The hardcoded list skips retired models rather
   than breaking, which gets most of the benefit — but it still ages.
+
+### The LLM-specific work, with how I would do it
+
+These are the gaps that matter for a product built around a model rather than a
+database. Each is out of scope for 48 hours; none is out of scope because it is
+unclear what to build.
+
+**Token and cost accounting.** `Chunk` already carries `finish_reason` on a
+terminal frame, which is where `usage` belongs too: request
+`stream_options={"include_usage": True}` and the provider sends a final chunk
+with prompt and completion counts. Store them on the assistant message, log cost
+per turn from a small per-model price table, and the question "what did this
+conversation cost" stops needing a grep. Truncation detection already shipped
+through this same channel, so the plumbing exists.
+
+**A real token budget.** `MAX_HISTORY_CHARS` approximates at four characters per
+token, which is wrong by 20–30% depending on the language and the tokenizer. The
+correct version asks the provider for the model's context length — OpenRouter
+returns it in `/api/v1/models` — and counts with that model's tokenizer, falling
+back to the character estimate when the model is unknown. It matters more once
+answers get long, because the budget has to cover the answer as well as the
+prompt.
+
+**Evaluating answers, not just requests.** There are golden tests for what we
+send — system prompt first, history in order, both roles — and none for what
+comes back, because free models are non-deterministic, rate limited and rotate
+through the fallback chain, so a scored eval set would be flaky and would burn
+the quota the demo needs. What I would build instead, in this order: structural
+assertions that need no judgement (non-empty, not truncated, does not echo the
+system prompt, answers in the language asked); then a fixed set of ~30 prompts
+scored by a model as judge, run on demand rather than in CI, with the scores
+tracked over time so a model swap shows up as a regression rather than a
+surprise. The first tier is worth having the day a second developer joins.
+
+**Prompt versioning.** The system prompt is an environment variable, which is
+right at this size, but nothing records which prompt produced which answer. The
+first thing needed when quality becomes the problem is exactly that join: a
+prompt id stored on the message, and the prompt text kept in the repository so a
+change is a reviewable diff rather than a deploy-time surprise.
+
+**Persisting on disconnect.** A client that closes the tab mid-stream loses an
+answer that was fully generated and fully paid for. Finishing the write in a
+background task rather than inside the response generator would keep it, at the
+cost of the turn no longer being strictly tied to a request the caller is still
+listening to.
 - Cursor pagination on the message list. Loading an entire conversation is fine
   at this size and will not stay fine.
 - A frontend test suite. There is none: the backend is what the brief says it

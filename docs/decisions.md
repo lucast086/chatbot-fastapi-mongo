@@ -470,6 +470,46 @@ script would be a wrapper around a single command and pure noise.
 
 ---
 
+## Prompt injection: the surface, and why it is not defended
+
+**Context.** User text goes into a model prompt, and in one place model output
+goes back into another prompt. That is the definition of an injection surface,
+and a chatbot with no retrieval and no tools is the easy case — but "easy" is a
+conclusion, not an excuse for not naming it.
+
+**The surface, precisely.** Two entry points. The chat prompt carries user
+messages and previous answers as ordinary `user` and `assistant` turns. The
+title generator interpolates *both* the user's question and the model's answer
+into a single `user` message under a system prompt asking for a summary.
+
+**Decision.** No input sanitising, no output filtering, no delimiter fencing.
+
+**Why this is safe here, and it is worth being specific rather than
+reassuring.** An injection is only interesting if something downstream acts on
+the output. Nothing does:
+
+- No tool calling, no function calling, no code execution, no retrieval.
+- Answers are stored and rendered as React text children, which escape. There is
+  no `dangerouslySetInnerHTML` anywhere.
+- The only path where model output influences state is the generated title, and
+  it is bounded three times over: 24 output tokens, whitespace collapsed, cut to
+  60 characters, then stored as a string that is only ever displayed.
+
+So the worst available outcome is a conversation that talks about something
+silly, or a title that does. That is the user doing it to their own
+conversation, which is not an attack.
+
+**What is genuinely unguarded, stated plainly.** A user can make the assistant
+ignore its system prompt. There is no authority boundary being crossed, because
+the system prompt carries no authority — it sets tone, not permissions.
+
+**When this would NOT apply.** The moment anything downstream acts on model
+output — a tool call, a database write derived from an answer, a rendered HTML
+block, an authorisation decision — this becomes a real threat model and the
+answer changes from "named and accepted" to "designed against".
+
+---
+
 ## `uv` for the Python toolchain
 
 **Context.** The project targets Python 3.13. Getting that interpreter plus a
