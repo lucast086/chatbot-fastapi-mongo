@@ -257,7 +257,15 @@ class OpenRouterTitleGenerator:
         await self._client.close()
 
     async def _first_model_that_answers(self, question: str, answer: str) -> Any:
-        """Try each model in turn, returning the first response or None."""
+        """Try each model in turn, returning the first response.
+
+        Every failure is swallowed because a title must never be able to cost a
+        turn, but each one is logged: a bare `continue` hides a genuine bug just
+        as effectively as it hides an expected rate limit.
+
+        Returns:
+            The provider response, or None when no model answered.
+        """
         for model in self._models:
             try:
                 return await self._client.chat.completions.create(
@@ -268,8 +276,8 @@ class OpenRouterTitleGenerator:
                     ],
                     max_tokens=24,
                 )
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.info("Title generation via %s failed: %s", model, exc)
         return None
 
     async def suggest_title(self, question: str, answer: str) -> str | None:

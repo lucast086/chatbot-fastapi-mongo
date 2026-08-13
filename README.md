@@ -261,7 +261,7 @@ uv sync
 |---|---|
 | `./scripts/start.sh` | Sets the API key and brings the stack up in one pass. A wrapper around Compose, not a dependency. |
 | `./scripts/test.sh` | Runs the suite. Starts MongoDB first and stops it again **only if this script started it**, so it does not kill a session you already had open. |
-| `./scripts/lint.sh` | Exactly the checks the CI `quality` job runs — ruff, `mypy --strict`, import-linter — so you find a failure here instead of on a pull request. |
+| `./scripts/lint.sh` | Every check CI runs: ruff, `mypy --strict`, import-linter, bandit and pip-audit. It covered only the first three until a bandit finding passed locally and failed on push — if a check gates the build, it belongs in the command you run before pushing. |
 
 Tests need neither an API key nor a network. The one test that talks to the real
 provider is marked `live`, skipped without a key, and excluded from CI:
