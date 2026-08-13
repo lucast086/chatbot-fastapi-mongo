@@ -11,11 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.domain.models import Conversation, Message
 
-# A defensive ceiling, not the configured limit. A Pydantic constraint is
-# evaluated at class definition time, before any settings object exists, so this
-# cannot read MAX_MESSAGE_LENGTH — which means raising that setting above this
-# number would have no effect. The service owns the real limit and produces the
-# better message; this only stops an absurdly large body from reaching it.
 SCHEMA_CEILING = 100_000
 
 
@@ -42,11 +37,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime
-    # Which model produced this answer. Present because several are configured
-    # and tried in order — without it a fallback would silently change the
-    # answer's provenance. Always null on user messages.
     model: str | None = None
-    # The provider stopped at the output cap, so this answer is cut off.
     truncated: bool = False
 
     @classmethod
@@ -93,8 +84,6 @@ class SendMessageRequest(BaseModel):
     @field_validator("content")
     @classmethod
     def reject_whitespace_only(cls, value: str) -> str:
-        # min_length alone would accept "   ", which is an empty message with
-        # extra steps.
         stripped = value.strip()
         if not stripped:
             raise ValueError("must not be empty or whitespace only")
@@ -111,8 +100,6 @@ class ConfigResponse(BaseModel):
     """What the frontend needs on load to decide whether to show the banner."""
 
     provider_configured: bool
-    # Plural: several are configured and tried in order, so the UI cannot claim
-    # a single one will answer.
     models: list[str]
     streaming_enabled: bool
     docs_url: str

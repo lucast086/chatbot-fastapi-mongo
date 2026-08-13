@@ -24,10 +24,6 @@ logger = logging.getLogger(__name__)
 
 DOCS_BASE_URL = "https://github.com/lucast086/chatbot-fastapi-mongo#troubleshooting"
 
-# A status code is an HTTP concept, so the mapping lives here rather than on the
-# domain error. Timeouts and outages are 504 and 502 respectively upstream, but
-# both surface as provider_unavailable; 504 is the more accurate of the two for
-# the common case and the message carries the detail.
 _STATUS_BY_REASON = {
     "not_found": 404,
     "validation_error": 422,
@@ -83,9 +79,6 @@ def error_body(
         "retryable": retryable,
         "docs_url": f"{DOCS_BASE_URL}-{reason.replace('_', '-')}",
     }
-    # Only on the streaming path, which cannot send a Retry-After header — the
-    # status line is long gone by the time the error is known. The JSON path
-    # uses the header instead, so this stays absent there.
     if retry_after is not None:
         body["retry_after"] = retry_after
     return body
@@ -109,8 +102,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def handle_domain_error(_request: Request, exc: DomainError) -> JSONResponse:
         headers: dict[str, str] | None = None
-        # Only meaningful when the provider told us how long to wait. Inventing
-        # a value would be worse than omitting the header.
         if isinstance(exc, ProviderError) and exc.retry_after is not None:
             headers = {"Retry-After": str(exc.retry_after)}
 
@@ -135,13 +126,6 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        # Mostly 404s for unknown routes and 405s for the wrong verb. Without
-        # this, those two would be the only responses in the API with a
-        # different shape.
-        #
-        # A 405 used to be labelled `internal_error`, which pointed the caller
-        # at a README section saying "this is a bug rather than a configuration
-        # problem" for what is plainly a client mistake.
         if exc.status_code == 404:
             reason = "not_found"
         elif exc.status_code < 500:
@@ -153,18 +137,11 @@ def register_exception_handlers(app: FastAPI) -> None:
             message=str(exc.detail),
             retryable=False,
             status_code=exc.status_code,
-            # Starlette generates an `Allow` header for a 405; dropping it
-            # breaks HTTP conformance for no reason.
             headers=dict(exc.headers) if exc.headers else None,
         )
 
     @app.exception_handler(Exception)
     async def handle_unexpected(_request: Request, exc: Exception) -> JSONResponse:
-        # Without this, anything that is not a DomainError escapes to
-        # Starlette's ServerErrorMiddleware and comes back as plain-text
-        # "Internal Server Error" — so the one error class nobody anticipated
-        # is the one that breaks the envelope the whole API promises. A
-        # database going away mid-request is the likely case.
         logger.exception("Unhandled error while serving a request")
         return error_response(
             reason="internal_error",

@@ -32,9 +32,6 @@ class MongoConversationStore:
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         result = await self._conversations.delete_one({"_id": conversation_id})
-        # Messages go regardless of whether the conversation document was there,
-        # so a partially deleted conversation cannot leave messages behind
-        # forever.
         await self._messages.delete_many({"conversation_id": conversation_id})
         return result.deleted_count > 0
 
@@ -42,13 +39,6 @@ class MongoConversationStore:
         if not messages:
             return
 
-        # One command rather than two awaits. MongoDB guarantees atomicity per
-        # *document*, not per `insert_many`: an ordered insert stops at the
-        # first failing document and keeps what it already wrote, so a partial
-        # turn is reachable in principle. What this does buy is real and worth
-        # having — it removes the application-level gap between two separate
-        # writes, collapsing the window from "however long the event loop takes
-        # to come back" to the duration of one server command.
         await self._messages.insert_many([_message_to_mongo(m) for m in messages])
 
         update: dict[str, Any] = {"updated_at": datetime.now(UTC)}
@@ -58,18 +48,12 @@ class MongoConversationStore:
         if last.model is not None:
             update["model"] = last.model
 
-        # Outside the guarantee above on purpose. If this fails, the worst case
-        # is one row briefly out of order in the sidebar; the conversation
-        # itself reads correctly because it is loaded from `messages`.
         await self._conversations.update_one({"_id": messages[0].conversation_id}, {"$set": update})
 
     async def rename_conversation(self, conversation_id: str, title: str) -> None:
         await self._conversations.update_one({"_id": conversation_id}, {"$set": {"title": title}})
 
     async def get_recent_messages(self, conversation_id: str, limit: int) -> list[Message]:
-        # MongoDB treats .limit(0) as "no limit", the exact opposite of what a
-        # caller asking for zero messages means. Without this guard,
-        # HISTORY_LIMIT=1 ships the entire conversation on every request.
         if limit <= 0:
             return []
         cursor = (

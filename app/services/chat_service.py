@@ -38,14 +38,10 @@ class ChatService:
     ) -> None:
         self._store = store
         self._llm = llm
-        # Known before any I/O, so the streaming route can report it as a real
-        # status code. The adapter keeps its own guard as defence in depth.
         self._provider_configured = provider_configured
         self._history_limit = history_limit
         self._max_message_length = max_message_length
         self._max_history_chars = max_history_chars
-        # Optional: without it, conversations keep the title derived from their
-        # first message, which is already good enough to navigate by.
         self._titles = titles
 
     async def send_message(
@@ -62,8 +58,6 @@ class ChatService:
         status code is still possible — once a stream opens, the status line has
         already been sent.
         """
-        # First, because it needs no I/O and because the streaming route can
-        # only return a status code for what is known before the stream opens.
         if not self._provider_configured:
             raise MissingApiKeyError()
 
@@ -73,9 +67,6 @@ class ChatService:
         if conversation is None:
             raise NotFoundError("Conversation", conversation_id)
 
-        # The window includes the message being sent, so the model always sees
-        # it last. Reading history before appending keeps the store the single
-        # source of ordering.
         history = await self._store.get_recent_messages(
             conversation_id, limit=max(self._history_limit - 1, 0)
         )
@@ -131,34 +122,21 @@ class ChatService:
         """
         text = "".join(c.text for c in chunks).strip()
         if not text:
-            # Storing an empty assistant message would look like a successful
-            # turn that answered nothing, which is worse than a clear failure
-            # the user can retry.
             raise ProviderUnavailableError("the provider returned an empty answer")
 
         assistant_message = Message(
             id=str(uuid.uuid4()),
             conversation_id=prepared.user_message.conversation_id,
-            # When the answer actually arrived, with a floor of one
-            # millisecond after the question so ordering stays deterministic —
-            # BSON truncates to milliseconds, so anything closer would collide.
-            # Stamping question+1ms unconditionally made every answer claim to
-            # have arrived instantly, which threw away the only latency signal
-            # a stored transcript has.
             created_at=max(
                 datetime.now(UTC),
                 prepared.user_message.created_at + timedelta(milliseconds=1),
             ),
             role=MessageRole.ASSISTANT,
             content=text,
-            # Whichever model actually answered — with more than one
-            # configured, that is not necessarily the first.
             model=chunks[-1].model,
             truncated=chunks[-1].finish_reason == "length",
         )
 
-        # Only name a conversation that has not been named. A later turn must
-        # not rewrite a title the user is already navigating by.
         title = None
         if prepared.conversation.title == DEFAULT_TITLE and not prepared.history:
             title = derive_title(prepared.user_message.content)
@@ -171,9 +149,6 @@ class ChatService:
 
         await self._store.add_turn([prepared.user_message, assistant_message], title=title)
 
-        # After the turn is safely stored, never before. A better title is a
-        # nicety; the turn is the product, and one must not be able to cost the
-        # other. Only for the turn that named the conversation.
         if title is not None and self._titles is not None:
             suggested = await self._titles.suggest_title(prepared.user_message.content, text)
             if suggested:

@@ -40,14 +40,6 @@ class ValidationError(DomainError):
     reason = "validation_error"
 
 
-# ---------------------------------------------------------------------------
-# Model provider
-#
-# Five distinct outcomes rather than one generic failure. The backend already
-# knows which one happened, and two of the five are worth retrying while the
-# rest are not — collapsing them would throw that away and leave the client
-# guessing.
-# ---------------------------------------------------------------------------
 class ProviderError(DomainError):
     """Base class for anything that went wrong talking to the model provider."""
 

@@ -31,9 +31,6 @@ from app.domain.models import Chunk, Message, MessageRole
 
 logger = logging.getLogger(__name__)
 
-# Failures where a *different* model might succeed. InvalidCredentialsError is
-# deliberately absent: it is the same API key for every model, so trying the
-# rest only burns time and delays a clear answer.
 _RECOVERABLE_BY_ANOTHER_MODEL = (
     RateLimitedError,
     ModelUnavailableError,
@@ -52,25 +49,32 @@ class OpenRouterLLM:
         max_output_tokens: int,
         first_token_timeout_seconds: float = 20.0,
     ) -> None:
-        # Tried in order. `:free` models are rate limited per model, so when the
-        # first says 429 the next is usually free to answer immediately.
+        """Build the client.
+
+        SDK-level retries are disabled: retrying is the caller's decision, based
+        on the `retryable` flag each error carries, and silent retries would
+        multiply free-tier quota consumption behind its back.
+
+        Args:
+            models: Tried in order. Free models are rate limited per model, so a
+                later one usually answers when an earlier one refuses.
+            first_token_timeout_seconds: How long to wait for a model's first
+                token before abandoning it for the next.
+        """
         self._models = models
         self._system_prompt = system_prompt
         self._max_output_tokens = max_output_tokens
         self._first_token_timeout = first_token_timeout_seconds
-        # The SDK refuses to construct with an empty key. The service checks
-        # for a missing key before reaching this adapter, so this placeholder
-        # only keeps the object constructible and dependency wiring branch-free.
-        # The guard in `stream` below stays as defence in depth.
         self._client = AsyncOpenAI(
             api_key=api_key or "not-configured",
             base_url=base_url,
             timeout=timeout_seconds,
-            max_retries=0,  # Retries are the caller's decision, based on `retryable`.
+            max_retries=0,
         )
         self._configured = bool(api_key)
 
     async def aclose(self) -> None:
+        """Release the shared HTTP connection pool."""
         await self._client.close()
 
     async def stream(self, messages: list[Message]) -> AsyncIterator[Chunk]:
@@ -87,14 +91,7 @@ class OpenRouterLLM:
                 return
             except _RECOVERABLE_BY_ANOTHER_MODEL as exc:
                 if started:
-                    # Bytes are already on the wire and cannot be rewound.
-                    # Starting over on another model would duplicate what the
-                    # caller has, so this is a failed turn instead.
                     raise
-                # Only failures a *different* model might not share. A rejected
-                # key is the same key for all of them, so it is not in this
-                # tuple and propagates on the first attempt — the taxonomy's own
-                # "do not retry what cannot succeed", one level up.
                 last_error = exc
                 remaining = len(self._models) - index - 1
                 logger.warning(
@@ -107,10 +104,6 @@ class OpenRouterLLM:
                 )
 
         if last_error is None:
-            # Only reachable if this adapter was built with an empty list. The
-            # settings field enforces min_length=1, but the constructor is
-            # public — and a real check is honest where an assert is not, since
-            # asserts are stripped under `python -O`.
             raise ProviderUnavailableError("no models are configured")
         raise last_error
 
@@ -126,11 +119,6 @@ class OpenRouterLLM:
         finish_reason: str | None = None
         started_at = time.monotonic()
 
-        # Built role by role rather than from `m.role.value`, which is a plain
-        # str: the SDK types each role as a Literal. Suppressing that mismatch
-        # instead would also defeat overload resolution on `stream`, turning the
-        # return type into a union that needs a second suppression. Two silenced
-        # errors to avoid four explicit lines is a bad trade.
         payload: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": self._system_prompt}
         ]
@@ -141,11 +129,6 @@ class OpenRouterLLM:
                 payload.append({"role": "assistant", "content": message.content})
 
         try:
-            # `async with`: when a client disconnects mid-generation, the outer
-            # generator is closed at its yield and this iterator is left
-            # suspended. Python does not close an async iterator on loop exit,
-            # so without this the provider response waits for garbage
-            # collection to be finalised.
             async with await self._client.chat.completions.create(
                 model=model,
                 messages=payload,
@@ -156,12 +139,6 @@ class OpenRouterLLM:
                 first = True
                 while True:
                     try:
-                        # Only the wait for the *first* token is bounded
-                        # separately. A model that accepts the request and then
-                        # goes quiet would otherwise hold the UI on "Thinking…"
-                        # for the full request timeout, which reads as a frozen
-                        # app. Nothing has been yielded yet, so abandoning it is
-                        # free and the caller can still try another model.
                         if first:
                             chunk = await asyncio.wait_for(
                                 anext(stream), timeout=self._first_token_timeout
@@ -182,9 +159,6 @@ class OpenRouterLLM:
                     delta = chunk.choices[0].delta
                     if delta.content:
                         if first:
-                            # The number that decides whether this feels fast.
-                            # Logged per turn because it is also how you tell a
-                            # slow model from a stalled one without guessing.
                             logger.info(
                                 "Model %s answered in %.1fs to first token",
                                 model,
@@ -193,33 +167,15 @@ class OpenRouterLLM:
                         first = False
                         yield Chunk(text=delta.content, model=model)
                     elif _reasoning_of(delta):
-                        # Reasoning models put their tokens in `reasoning` with
-                        # `content` null for long stretches. Yielding nothing
-                        # would make finish_turn see an empty answer and report
-                        # a retryable provider outage — telling the caller to
-                        # retry a permanent, configuration-caused condition,
-                        # which is the exact mistake ModelUnavailableError
-                        # exists to avoid making twice.
                         saw_reasoning_only = True
             if not first:
-                # A terminal chunk carrying only the finish reason, which the
-                # provider sends last. Buffering a real chunk to attach it would
-                # delay every token by one, which is the wrong trade on a
-                # streaming product; an empty text costs nothing when joined.
                 yield Chunk(text="", model=model, finish_reason=finish_reason)
 
             if saw_reasoning_only and first:
-                # Raised, not logged. Returning normally here ends the fallback
-                # loop with no chunks and no error, so the next healthy model is
-                # never tried and finish_turn reports a *retryable* outage for a
-                # permanent configuration problem — the mistake the comment
-                # above says this exists to avoid, which it did not.
                 raise ModelUnavailableError(model, "it emitted only reasoning tokens and no answer")
         except openai.AuthenticationError as exc:
             raise InvalidCredentialsError() from exc
         except openai.PermissionDeniedError as exc:
-            # A valid key without access to this model. Same remedy as a bad
-            # key from the caller's point of view: fix the configuration.
             raise InvalidCredentialsError() from exc
         except openai.RateLimitError as exc:
             raise RateLimitedError(retry_after=_retry_after_from(exc)) from exc
@@ -227,10 +183,6 @@ class OpenRouterLLM:
             raise ProviderUnavailableError("the request timed out") from exc
         except openai.APIStatusError as exc:
             logger.warning("Model provider returned %s: %s", exc.status_code, exc.message)
-            # 404 means the model name is wrong or has stopped being free.
-            # Kept separate from the 5xx case because waiting cannot fix it,
-            # and this was found by the live test rather than reasoned about:
-            # the default model shipped in this repo had already been retired.
             if exc.status_code == 404:
                 raise ModelUnavailableError(model, _provider_detail(exc)) from exc
             raise ProviderUnavailableError(f"the provider returned {exc.status_code}") from exc
@@ -257,8 +209,6 @@ def _retry_after_from(exc: openai.RateLimitError) -> int | None:
     try:
         return int(float(raw))
     except ValueError:
-        # The header also allows an HTTP date. Parsing that for a value we can
-        # do without is not worth the code.
         return None
 
 
@@ -294,17 +244,11 @@ class OpenRouterTitleGenerator:
     def __init__(
         self, api_key: str, base_url: str, models: list[str], timeout_seconds: float
     ) -> None:
-        # The same list the chat uses. Pinning this to models[0] aimed the one
-        # call without a fallback at the most heavily used and therefore most
-        # rate-limited model, so titles failed precisely when the chat's own
-        # fallback was doing its job.
         self._models = models
         self._configured = bool(api_key)
         self._client = AsyncOpenAI(
             api_key=api_key or "not-configured",
             base_url=base_url,
-            # Much shorter than the chat timeout: nobody waits on a title, and a
-            # slow one should be abandoned rather than delay the response.
             timeout=min(timeout_seconds, 15.0),
             max_retries=0,
         )
@@ -334,9 +278,6 @@ class OpenRouterTitleGenerator:
         try:
             response = await self._first_model_that_answers(question, answer)
         except Exception:
-            # Every failure is swallowed on purpose. The turn has already been
-            # answered and stored; the fallback title is already in place. There
-            # is nothing here worth surfacing to the user.
             logger.info("Could not generate a title; keeping the derived one.")
             return None
 

@@ -33,19 +33,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mongo_client = client
     app.state.mongo_db = client[settings.mongo_db]
 
-    # Index creation needs a reachable server. A failure here must not stop the
-    # application: the readiness probe already reports MongoDB being down, and
-    # crashing on boot would turn a recoverable outage into a restart loop.
     try:
         await ensure_indexes(app.state.mongo_db)
     except Exception:
         logger.warning("Could not create indexes at startup; MongoDB is unreachable.")
 
-    # Built once, like the Mongo client and for the same reason: each
-    # AsyncOpenAI owns an httpx connection pool, so constructing them per
-    # request meant a fresh TLS handshake on every turn — added straight to
-    # time-to-first-token on a streaming product — and pools that were never
-    # closed, accumulating sockets under load.
     app.state.llm = OpenRouterLLM(
         api_key=settings.openrouter_api_key.get_secret_value(),
         base_url=settings.openrouter_base_url,
@@ -62,8 +54,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout_seconds=settings.request_timeout_seconds,
     )
 
-    # Detected here rather than when someone sends their first message, so the
-    # UI can show the banner as soon as the page opens.
     if not settings.provider_configured:
         logger.warning(
             "OPENROUTER_API_KEY is not set. The app is running in a degraded state: "

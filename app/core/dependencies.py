@@ -20,8 +20,6 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 def get_db(request: Request) -> AsyncDatabase[dict[str, Any]]:
-    # Created once in the lifespan, not per request: a connection pool is meant
-    # to be shared for the lifetime of the process.
     db: AsyncDatabase[dict[str, Any]] = request.app.state.mongo_db
     return db
 
@@ -44,12 +42,6 @@ ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation
 
 
 def get_llm(request: Request) -> LLMPort:
-    # Built once in the lifespan, not per request — same reasoning as the Mongo
-    # client above: an HTTP connection pool is meant to be shared.
-    #
-    # There is no fake branch here. In a chatbot the generation is the product,
-    # so a runtime fake would make the app look like it works while hiding
-    # whether the real integration does. The double lives in tests only.
     llm: LLMPort = request.app.state.llm
     return llm
 

@@ -25,34 +25,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Application -------------------------------------------------------
     app_env: Literal["development", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
-    # --- MongoDB -----------------------------------------------------------
-    # The default points at localhost so the test suite and a host-side run work
-    # without configuration. docker-compose.yml overrides it with the service
-    # name. SecretStr because a real deployment embeds credentials in this URI.
     mongo_uri: SecretStr = SecretStr("mongodb://localhost:27017")
     mongo_db: str = "chatbot"
 
-    # --- Model provider ----------------------------------------------------
-    # Empty by default and deliberately not validated at startup: the
-    # application is expected to boot without it. `provider_configured` below is
-    # what the health check and the frontend banner read.
     openrouter_api_key: SecretStr = SecretStr("")
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    # A list, tried in order. `:free` models are rate limited *per model*, so a
-    # second one is usually available the moment the first says 429 — and a
-    # model retired out from under this default is skipped rather than fatal,
-    # which is what keeps a hardcoded list from rotting into a broken app.
-    #
-    # Deliberately excludes reasoning models: they put their tokens in
-    # `delta.reasoning` and leave `content` empty, which reads as a failed turn.
-    # NoDecode: pydantic-settings JSON-decodes complex fields straight out of
-    # the environment, before any validator runs, so a comma-separated string
-    # fails to parse before `split_comma_separated` below ever sees it.
-    # Asking a .env file for JSON would be a hostile contract.
     openrouter_models: Annotated[list[str], NoDecode] = Field(
         default=[
             "google/gemma-4-31b-it:free",
@@ -62,38 +42,25 @@ class Settings(BaseSettings):
         min_length=1,
     )
     request_timeout_seconds: float = Field(default=60.0, gt=0)
-    # How long to wait for a model's *first* token before giving up on it.
-    # Much shorter than the overall timeout because nothing has been sent to
-    # the client yet, so abandoning it is free — and a model that has gone
-    # quiet is indistinguishable from a frozen app until this fires.
     first_token_timeout_seconds: float = Field(default=20.0, gt=0)
-    # An answer cap. Without one a runaway or reasoning-heavy model can
-    # produce until the context window ends, and a single document over
-    # MongoDB's 16MB limit would fail the write for the whole turn.
     max_output_tokens: int = Field(default=2048, gt=0)
 
-    # --- Conversation behaviour --------------------------------------------
     system_prompt: str = "You are a helpful assistant. Answer clearly and concisely."
-    # How many previous messages are sent with each request. A window by message
-    # count, not by tokens — a real token budget is listed in the README as
-    # future work.
     history_limit: int = Field(default=20, gt=0)
     max_message_length: int = Field(default=8000, gt=0)
-    # A ceiling on the prompt, counted in characters. HISTORY_LIMIT alone bounds
-    # the number of messages, not their size: twenty messages of 8000 characters
-    # is far past the context window of several free models, and that surfaces
-    # as a provider error rather than a graceful truncation. Characters rather
-    # than tokens because the right tokenizer differs per model; roughly four
-    # characters per token, so 24000 is about 6k tokens.
     max_history_chars: int = Field(default=24_000, gt=0)
-    # One extra provider call after the first turn of a conversation, to replace
-    # the truncated first message with a real title. Off-switch provided because
-    # it doubles the requests a first turn costs, which matters on a free tier.
     generate_titles: bool = True
 
     @field_validator("openrouter_models", mode="before")
     @classmethod
     def split_comma_separated(cls, value: object) -> object:
+        """Accept a comma-separated string for the model list.
+
+        Pairs with the `NoDecode` annotation on the field: pydantic-settings
+        JSON-decodes complex types straight from the environment before any
+        validator runs, so without it a plain string fails to parse before this
+        is reached. Asking a .env file for JSON would be a hostile contract.
+        """
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value

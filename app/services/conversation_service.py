@@ -12,8 +12,6 @@ from app.domain.models import Conversation, Message
 from app.domain.ports import ConversationStorePort
 
 DEFAULT_TITLE = "New conversation"
-# Long enough to tell two conversations apart in a sidebar, short enough not to
-# wrap. The title is the only thing distinguishing them, so it has to be useful.
 TITLE_MAX_LENGTH = 60
 
 
@@ -32,8 +30,6 @@ class ConversationService:
         await self._store.create_conversation(conversation)
         return conversation
 
-    # Not named `list`: a method by that name shadows the builtin inside the
-    # class body, so every `list[...]` annotation below it fails to resolve.
     async def list_recent(self, limit: int) -> list[Conversation]:
         return await self._store.list_conversations(limit)
 
@@ -64,8 +60,6 @@ def derive_title(first_message: str) -> str:
     collapsed = " ".join(first_message.split())
     if len(collapsed) <= TITLE_MAX_LENGTH:
         return collapsed or DEFAULT_TITLE
-    # Cut on a word boundary when there is one reasonably close to the limit,
-    # rather than mid-word.
     truncated = collapsed[:TITLE_MAX_LENGTH]
     last_space = truncated.rfind(" ")
     if last_space > TITLE_MAX_LENGTH // 2:
